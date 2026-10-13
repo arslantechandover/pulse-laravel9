@@ -10,6 +10,7 @@ use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Queue\Events\JobQueued;
 use Illuminate\Queue\Events\JobReleasedAfterException;
+use Illuminate\Support\Str;
 use Laravel\Pulse\Pulse;
 use ReflectionClass;
 
@@ -61,7 +62,9 @@ class Queues
             },
             $this->resolveQueue($event),
             match ($class) {
-                JobQueued::class => $event->payload()['uuid'], // @phpstan-ignore method.notFound
+                JobQueued::class => method_exists($event, 'payload')
+                    ? $event->payload()['uuid'] // @phpstan-ignore method.notFound
+                    : (string) Str::uuid(), // Laravel 9 compatibility: the payload is not available on the event...
                 default => $event->job->uuid(), // @phpstan-ignore method.nonObject
             },
             match ($class) {

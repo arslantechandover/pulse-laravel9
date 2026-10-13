@@ -74,7 +74,12 @@ class CheckCommand extends Command
                 return self::SUCCESS;
             }
 
-            Sleep::until($now->addSecond());
+            if (class_exists(Sleep::class)) {
+                Sleep::until($now->addSecond());
+            } else {
+                // Laravel 9 compatibility: Sleep was added in Laravel 10...
+                usleep((int) max(0, $now->addSecond()->getPreciseTimestamp() - CarbonImmutable::now()->getPreciseTimestamp()));
+            }
         }
     }
 

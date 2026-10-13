@@ -61,7 +61,12 @@ class WorkCommand extends Command
                 return self::SUCCESS;
             }
 
-            Sleep::for(1)->second();
+            if (class_exists(Sleep::class)) {
+                Sleep::for(1)->second();
+            } else {
+                // Laravel 9 compatibility: Sleep was added in Laravel 10...
+                sleep(1);
+            }
         }
     }
 

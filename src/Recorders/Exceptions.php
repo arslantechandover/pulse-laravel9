@@ -35,7 +35,16 @@ class Exceptions
      */
     public function register(callable $record, Application $app): void
     {
-        $this->afterResolving($app, ExceptionHandler::class, fn (ExceptionHandler $handler) => $handler->reportable(fn (Throwable $e) => $record($e))); // @phpstan-ignore method.notFound
+        $this->afterResolving($app, ExceptionHandler::class, function (ExceptionHandler $handler) use ($record) {
+            // Laravel 9 compatibility: Collision < 7.7 wraps the console handler without forwarding reportable()...
+            if (! method_exists($handler, 'reportable') && property_exists($handler, 'appExceptionHandler')) {
+                $handler = (fn () => $this->appExceptionHandler)->call($handler);
+            }
+
+            if (method_exists($handler, 'reportable')) {
+                $handler->reportable(fn (Throwable $e) => $record($e));
+            }
+        });
 
         $this->afterResolving($app, Dispatcher::class, fn (Dispatcher $events) => $events->listen(fn (ExceptionReported $event) => $record($event->exception)));
     }

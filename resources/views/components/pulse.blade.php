@@ -1,4 +1,4 @@
-@use('Laravel\Pulse\Facades\Pulse')
+@php use Laravel\Pulse\Facades\Pulse; @endphp
 @props(['cols' => 12, 'fullWidth' => false])
 <!DOCTYPE html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}">

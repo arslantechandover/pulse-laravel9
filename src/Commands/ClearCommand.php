@@ -4,6 +4,7 @@ namespace Laravel\Pulse\Commands;
 
 use Illuminate\Console\Command;
 use Illuminate\Console\ConfirmableTrait;
+use Illuminate\Foundation\Application;
 use Laravel\Pulse\Pulse;
 use Symfony\Component\Console\Attribute\AsCommand;
 
@@ -36,6 +37,18 @@ class ClearCommand extends Command
      * @var array<int, string>
      */
     protected $aliases = ['pulse:purge'];
+
+    /**
+     * Laravel 9 compatibility: Laravel < 10 cannot register pipe-joined command names.
+     */
+    public static function getDefaultName(): ?string
+    {
+        if (class_exists(Application::class) && version_compare(Application::VERSION, '10.0.0', '<')) {
+            return 'pulse:clear';
+        }
+
+        return parent::getDefaultName();
+    }
 
     /**
      * Handle the command.

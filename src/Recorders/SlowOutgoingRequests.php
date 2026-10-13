@@ -8,6 +8,7 @@ use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Http\Client\Factory;
 use Laravel\Pulse\Concerns\ConfiguresAfterResolving;
 use Laravel\Pulse\Pulse;
+use Laravel\Pulse\Support\Laravel9HttpFactory;
 use Psr\Http\Message\RequestInterface;
 use Psr\Http\Message\ResponseInterface;
 use Throwable;
@@ -37,7 +38,14 @@ class SlowOutgoingRequests
      */
     public function register(callable $record, Application $app): void
     {
-        $this->afterResolving($app, Factory::class, fn (Factory $factory) => $factory->globalMiddleware($this->middleware($record)));
+        // Laravel 9 compatibility: Factory::globalMiddleware() was added in Laravel 10...
+        if (! method_exists(Factory::class, 'globalMiddleware') && ! $app->bound(Factory::class)) {
+            $app->bind(Factory::class, Laravel9HttpFactory::class);
+        }
+
+        $this->afterResolving($app, Factory::class, fn (Factory $factory) => method_exists($factory, 'globalMiddleware')
+            ? $factory->globalMiddleware($this->middleware($record))
+            : null);
     }
 
     /**

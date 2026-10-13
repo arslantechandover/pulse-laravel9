@@ -50,7 +50,8 @@ class Users implements ResolvesUsers
             // @phpstan-ignore staticMethod.notFound
             $this->resolvedUsers = $model::findMany($keys);
         } else {
-            $this->resolvedUsers = $keys->map(fn ($key) => $provider->retrieveById($key));
+            // Drop unknown users (retrieveById() returns null) so they fall back to "ID: {key}" instead of failing...
+            $this->resolvedUsers = $keys->map(fn ($key) => $provider->retrieveById($key))->filter()->values();
         }
 
         return $this;

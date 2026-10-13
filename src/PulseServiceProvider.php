@@ -238,7 +238,9 @@ class PulseServiceProvider extends ServiceProvider
 
             AboutCommand::add('Pulse', fn () => [
                 'Version' => InstalledVersions::getPrettyVersion('laravel/pulse'),
-                'Enabled' => AboutCommand::format(config('pulse.enabled'), console: fn ($value) => $value ? '<fg=yellow;options=bold>ENABLED</>' : 'OFF'),
+                'Enabled' => method_exists(AboutCommand::class, 'format')
+                    ? AboutCommand::format(config('pulse.enabled'), console: fn ($value) => $value ? '<fg=yellow;options=bold>ENABLED</>' : 'OFF')
+                    : (config('pulse.enabled') ? 'ENABLED' : 'OFF'), // Laravel 9 compatibility...
             ]);
 
             if (method_exists($this, 'reloads')) {

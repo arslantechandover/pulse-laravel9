@@ -1,5 +1,47 @@
 # Release Notes
 
+## Unreleased (laravel9-support fork, based on v1.4.7)
+
+Laravel 9.52 compatibility. On Laravel 10+ each change defers to the original upstream code path.
+
+### Added
+
+* `Laravel\Pulse\Support\Laravel9HttpFactory`: Laravel 9-only `Http\Client\Factory` subclass providing Laravel 10's `globalMiddleware()`. Bound by `SlowOutgoingRequests` only when the method is missing and no other `Factory` binding exists.
+
+### Changed
+
+* `composer.json`: widened all 13 `illuminate/*` constraints to `^9.52|^10.48.4|^11.0.8|^12.0`.
+* `composer.json`: removed `conflict: nunomaduro/collision <7.7.0`, which blocks Laravel 9 apps (Collision 6.x; Collision 7.7+ requires PHPUnit 10.1.2+ and targets Laravel 10). Upstream added it (commit `86e6bfb`) because Collision < 7.7's console exception-handler wrapper lacks `reportable()`; that case is now handled in `Recorders\Exceptions`.
+* `Recorders\Exceptions`: when the resolved exception handler lacks `reportable()` (Collision < 7.7 console wrapper, active when running in console outside unit tests), registers the callback on the wrapped application handler instead. Upstream path unchanged otherwise. Without this, every Artisan command fails on Laravel 9 with Pulse enabled.
+* Views (`components/pulse`, `components/select`, `livewire/cache`, `livewire/queues`, `livewire/slow-outgoing-requests`): replaced the Blade `@use(...)` directive (Laravel 10+) with an equivalent `@php use ...; @endphp`. On Laravel 9 `@use` is not compiled, so it was printed as text and the import was skipped, causing `Class "Str" not found` when cards rendered (unless the app happened to register a global `Str` alias).
+* `Users`: when the user provider is not Eloquent, unknown user IDs (`retrieveById()` returns `null`) are dropped so they display as `ID: {key}`, instead of failing with `Users::key(): Argument #1 ($user) must be of type Authenticatable, null given`. Not Laravel 9-specific; surfaced in an app whose default `web` guard uses the `database` user provider while requests are authenticated through other guards.
+* `Commands\ClearCommand`: on Laravel < 10 reports its default name as `pulse:clear` only. Laravel 9 does not split Symfony's pipe-joined `pulse:clear|pulse:purge` name, which broke `artisan list` and the command itself. Laravel 10+ keeps the upstream name and alias.
+* `CheckCommand` / `WorkCommand`: fall back to `usleep()` / `sleep(1)` when `Illuminate\Support\Sleep` (Laravel 10+) is unavailable; sleep-until and sleep-for semantics preserved.
+* `RemembersQueries`: falls back to a copy of Laravel 10's `Benchmark::value()` when unavailable.
+* `PulseServiceProvider`: `about` shows plain `ENABLED`/`OFF` on Laravel 9 (`AboutCommand::format()` is Laravel 10+). No console styling; `about --json` returns a string instead of a boolean.
+* `Recorders\Queues`: Laravel 9's `JobQueued` has no payload, so a random UUID seeds sampling for queued events. Identical at the default sample rate of 1; below 1, queued events are sampled independently of the job's later lifecycle events.
+* `Recorders\SlowOutgoingRequests`: registers via the compat factory on Laravel 9. If the app binds its own `Factory`, outgoing requests are not monitored (no exception).
+
+### Known limitations
+
+* Raw Guzzle clients and third-party SDKs are not monitored (same as upstream).
+* An `Http` client resolved before Pulse boots is not monitored.
+* `pulse:purge` (legacy alias of `pulse:clear`) is not available on Laravel 9; use `pulse:clear`.
+* User-based cards resolve user IDs through the application's default guard. Apps that authenticate through other guards (e.g. Passport API guards) record those guards' IDs, which may then display as `ID: {key}` or match an unrelated user; configure `Pulse::users()` in the app to resolve them correctly.
+
+### Validation performed
+
+* `php -l` on all changed PHP files; `composer validate --no-check-publish --no-check-lock`.
+* 48 isolated checks against Laravel 9.52.20 / PHP 8.1.12 covering every fallback: Http fake/middleware/retry/pool/failure/timing parity with a plain Laravel 9 Factory, queue events, benchmark, about, and command loop timing. The queue Laravel 10 path was simulated with Laravel 10.48.4's `JobQueued`.
+* Collision conflict removal: a Composer `--dry-run` against a scratch copy of the backend's `composer.json`/`composer.lock` and a scratch copy of this fork without the conflict resolved with 3 lock installs, 0 updates and 0 removals (`doctrine/sql-formatter`, `laravel/pulse`, `livewire/livewire`). That dry run used `--ignore-platform-req=ext-sodium` because the local PHP lacks the sodium extension that the backend's existing lockfile already requires; it bypasses Composer's check and does not enable the extension.
+* Collision handling: installing this fork in a Laravel 9.52.20 app with Collision 6.4.0 reproduced the upstream `Call to undefined method …ExceptionHandler::reportable()` failure in `php artisan package:discover`. An isolated check then confirmed the fallback records console exceptions through the Collision 6.4.0 wrapper while the direct path still records exceptions on a plain handler.
+* `ClearCommand`: in a Laravel 9.52.20 app, `php artisan list` failed with `The "pulse:clear|pulse:purge" command cannot be found because it is registered under multiple names`; after the change `artisan list` and `pulse:clear --help` succeed and `pulse:purge` reports `Command "pulse:purge" is not defined` (expected on Laravel 9).
+* Views: in a Laravel 9.52.20 app the dashboard printed `@use(...)` literally and lazy cards failed with `Class "Str" not found`; after the change all five views compile on Laravel 9's Blade compiler to `<?php use ...; ?>` (PHP lint clean).
+* `Users`: with a `database` user provider, an unknown ID now resolves to `ID: {key}` instead of the `Users::key()` TypeError.
+* Backend integration test (disposable Laravel 9.52.20 copy with this fork installed as a copied path repository, PHP 8.1.12, MySQL 8.0.30, Livewire fork 3.8.10): `package:discover`, `artisan list`, `about`, `pulse:check --once`, `pulse:work --stop-when-empty`, `pulse:restart` and `pulse:clear --help` succeed; every recorder wrote to a dedicated metrics database (requests, user requests, exceptions incl. a console-reported one, slow queries, outgoing requests, queued/processed/failed and slow jobs, cache, servers).
+* Browser test (headless Chrome via DevTools protocol): the dashboard loads, all lazy cards load with HTTP 200 Livewire updates, recorded data is visible on every card, no JavaScript or console errors, polling sends updates, the period buttons update the URL (`?period=6_hours`) and `?period=7_days` deep links set every component's period.
+* Not yet run: Laravel 10+ runtime, Pulse's own test suite, PHPStan.
+
 ## [Unreleased](https://github.com/laravel/pulse/compare/v1.4.6...1.x)
 
 ## [v1.4.6](https://github.com/laravel/pulse/compare/v1.4.5...v1.4.6) - 2025-12-08
