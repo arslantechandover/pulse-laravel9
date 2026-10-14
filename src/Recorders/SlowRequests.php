@@ -7,6 +7,7 @@ use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Route;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Config;
 use Laravel\Pulse\Concerns\ConfiguresAfterResolving;
 use Laravel\Pulse\Pulse;
 use Symfony\Component\HttpFoundation\Response;
@@ -74,6 +75,16 @@ class SlowRequests
                 key: (string) $userId,
                 timestamp: $startedAt,
             )->count();
+
+            // Fork: per-user slow endpoints for the Slow User Endpoints card (opt out with `user_endpoints` => false)...
+            if (Config::get('pulse.recorders.'.self::class.'.user_endpoints', true)) {
+                $this->pulse->record(
+                    type: 'slow_user_endpoint',
+                    key: json_encode([(string) $userId, $request->method(), $path], flags: JSON_THROW_ON_ERROR),
+                    value: $duration,
+                    timestamp: $startedAt,
+                )->max()->count();
+            }
         }
     }
 }
