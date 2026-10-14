@@ -187,6 +187,7 @@ class PulseServiceProvider extends ServiceProvider
             $livewire->component('pulse.slow-jobs', Livewire\SlowJobs::class);
             $livewire->component('pulse.exceptions', Livewire\Exceptions::class);
             $livewire->component('pulse.slow-requests', Livewire\SlowRequests::class);
+            $livewire->component('pulse.slow-user-requests', Livewire\SlowUserRequests::class);
             $livewire->component('pulse.slow-queries', Livewire\SlowQueries::class);
             $livewire->component('pulse.period-selector', Livewire\PeriodSelector::class);
             $livewire->component('pulse.slow-outgoing-requests', Livewire\SlowOutgoingRequests::class);

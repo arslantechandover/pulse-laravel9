@@ -7,6 +7,7 @@ Laravel 9.52 compatibility. On Laravel 10+ each change defers to the original up
 ### Added
 
 * `Laravel\Pulse\Support\Laravel9HttpFactory`: Laravel 9-only `Http\Client\Factory` subclass providing Laravel 10's `globalMiddleware()`. Bound by `SlowOutgoingRequests` only when the method is missing and no other `Factory` binding exists.
+* `Livewire\SlowUserRequests` card (`pulse.slow-user-requests`, view `livewire/slow-user-requests`), added to the default dashboard after Slow Requests. Shows the top 10 users by `slow_user_request` count (already recorded by the `SlowRequests` recorder; no recording or storage change). Counts are scaled by the `SlowRequests` recorder's sample rate and the header shows its threshold. The existing Application Usage card with `type="slow_requests"` reads these from its `usage` dropdown/URL value instead of `type`, so it scales by the user-requests sample rate when the rates differ; this card avoids that. Fork-only feature, not Laravel 9-specific.
 
 ### Changed
 
@@ -40,6 +41,7 @@ Laravel 9.52 compatibility. On Laravel 10+ each change defers to the original up
 * `Users`: with a `database` user provider, an unknown ID now resolves to `ID: {key}` instead of the `Users::key()` TypeError.
 * Backend integration test (disposable Laravel 9.52.20 copy with this fork installed as a copied path repository, PHP 8.1.12, MySQL 8.0.30, Livewire fork 3.8.10): `package:discover`, `artisan list`, `about`, `pulse:check --once`, `pulse:work --stop-when-empty`, `pulse:restart` and `pulse:clear --help` succeed; every recorder wrote to a dedicated metrics database (requests, user requests, exceptions incl. a console-reported one, slow queries, outgoing requests, queued/processed/failed and slow jobs, cache, servers).
 * Browser test (headless Chrome via DevTools protocol): the dashboard loads, all lazy cards load with HTTP 200 Livewire updates, recorded data is visible on every card, no JavaScript or console errors, polling sends updates, the period buttons update the URL (`?period=6_hours`) and `?period=7_days` deep links set every component's period.
+* `SlowUserRequests` card (Laravel 9.52.20 app, PHP 8.1.12, files overlaid on the v1.4.7.1 install, read-only metrics database): component registered, rendered with `lazy: false` for the 7-day period; counts match `Pulse::aggregate('slow_user_request', 'count', …)`; with sample rates slow 0.5 / user 0.1 the card shows the correctly scaled `~18` for 9 raw (the Usage card with `type="slow_requests"` shows `~90`); the dashboard page lists the card; existing cards, routes and API responses unchanged. Not yet browser-tested.
 * Not yet run: Laravel 10+ runtime, Pulse's own test suite, PHPStan.
 
 ## [Unreleased](https://github.com/laravel/pulse/compare/v1.4.6...1.x)
