@@ -15,8 +15,6 @@
 
     <livewire:pulse.slow-user-requests cols="6" />
 
-    <livewire:pulse.slow-user-endpoints cols="6" />
-
     <livewire:pulse.slow-jobs cols="6" />
 
     <livewire:pulse.slow-outgoing-requests cols="6" />
