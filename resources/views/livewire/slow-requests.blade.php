@@ -56,6 +56,19 @@
                                         {{ $slowRequest->action }}
                                     </p>
                                 @endif
+                                @if ($breakdown = $slowRequest->breakdown)
+                                    @php
+                                        $ms = fn ($value) => $value === null ? 'n/a' : number_format($value).' ms';
+                                        $queueMeasured = $breakdown['queue_measured'];
+                                        $queue = $queueMeasured === 0 ? 'n/a' : $ms($breakdown['queue']['avg']).($queueMeasured < $breakdown['requests'] ? '*' : '');
+                                        $title = 'Average per slow request ('.number_format($breakdown['requests']).' with a breakdown): total = queue wait + DB + HTTP + app + other, from the web server hand-off (or PHP start) until the response was sent. '
+                                            .'Max: total '.$ms($breakdown['total']['max']).', queue wait '.($queueMeasured === 0 ? 'n/a' : $ms($breakdown['queue']['max'])).', DB '.$ms($breakdown['db']['max']).' ('.number_format($breakdown['queries']['max'] ?? 0).' queries), HTTP '.$ms($breakdown['http']['max']).', app + other '.$ms($breakdown['app']['max']).'. '
+                                            .($queueMeasured < $breakdown['requests'] ? 'Queue wait measured for '.number_format($queueMeasured).' of '.number_format($breakdown['requests']).' requests (needs the web server timestamp PULSE_REQUEST_START); the others start at PHP start.' : 'Queue wait measured for all requests.');
+                                    @endphp
+                                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400 truncate" title="{{ $title }}">
+                                        avg total {{ $ms($breakdown['total']['avg']) }} = queue {{ $queue }} + DB {{ $ms($breakdown['db']['avg']) }} ({{ number_format($breakdown['queries']['avg'] ?? 0) }} queries) + HTTP {{ $ms($breakdown['http']['avg']) }} + app + other {{ $ms($breakdown['app']['avg']) }}
+                                    </p>
+                                @endif
                                 @if (is_array($config['threshold']))
                                     <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                                         {{ $slowRequest->threshold }}ms threshold
