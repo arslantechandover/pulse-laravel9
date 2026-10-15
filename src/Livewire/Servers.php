@@ -26,7 +26,7 @@ class Servers extends Card
     public function render(): Renderable
     {
         [$servers, $time, $runAt] = $this->remember(function () {
-            $types = ['cpu', 'memory', 'server_load', 'server_iowait', 'server_steal', 'server_swap', 'server_storage', 'fpm_workers', 'fpm_queue'];
+            $types = ['cpu', 'memory', 'server_load', 'server_iowait', 'fpm_workers', 'fpm_queue'];
             $graphs = $this->graph($types, 'avg');
             $peaks = $this->graph($types, 'max');
             $bucketSeconds = (int) ($this->periodAsInterval()->totalSeconds / 60);
@@ -49,9 +49,6 @@ class Servers extends Card
                         'memory' => ['type' => 'memory', 'scale' => 1, 'y_max' => (int) $values->memory_total, 'current' => $values->memory_used ?? null],
                         'load' => ['type' => 'server_load', 'scale' => 100, 'y_max' => null, 'current' => $values->load ?? null],
                         'iowait' => ['type' => 'server_iowait', 'scale' => 100, 'y_max' => null, 'current' => $values->iowait ?? null],
-                        'steal' => ['type' => 'server_steal', 'scale' => 100, 'y_max' => null, 'current' => $values->steal ?? null],
-                        'swap' => ['type' => 'server_swap', 'scale' => 1, 'y_max' => $values->swap_total ?? null, 'current' => $values->swap_used ?? null],
-                        'storage' => ['type' => 'server_storage', 'scale' => 1, 'y_max' => $storage->first()?->total, 'current' => $storage->first()?->used],
                         'fpm_workers' => ['type' => 'fpm_workers', 'scale' => 1, 'y_max' => $maxChildren ?: null, 'current' => $fpm->isEmpty() ? null : $fpm->sum('workers')],
                         'fpm_queue' => ['type' => 'fpm_queue', 'scale' => 1, 'y_max' => null, 'current' => $fpm->isEmpty() ? null : $fpm->sum('queue')],
                     ])->map(function ($chart) use ($series, $graphs, $peaks) {

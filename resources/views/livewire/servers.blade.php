@@ -78,6 +78,7 @@ $rows = ! empty($rows) ? $rows : 1;
                             max: @js($charts['cpu']['max']->values()),
                             yMax: 100,
                             unit: '%',
+                            decimals: 1,
                         })"
                     >
                         <canvas x-ref="canvas" class="w-full ring-1 ring-gray-900/5 bg-white dark:bg-gray-900 rounded-md shadow-sm"></canvas>
@@ -107,7 +108,8 @@ $rows = ! empty($rows) ? $rows : 1;
                             avg: @js($charts['memory']['avg']->values()),
                             max: @js($charts['memory']['max']->values()),
                             yMax: @js($server->memory_total),
-                            unit: ' MB',
+                            unit: '',
+                            format: 'mb',
                         })"
                     >
                         <canvas x-ref="canvas" class="w-full ring-1 ring-gray-900/5 bg-white dark:bg-gray-900 rounded-md shadow-sm"></canvas>
@@ -141,17 +143,14 @@ $rows = ! empty($rows) ? $rows : 1;
                     $fpmPools = $server->fpm->pluck('name')->implode(', ');
                     $fpmTitle = $server->fpm->map(fn ($pool) => "pool {$pool->name}: pm={$pool->pm}, max_children={$pool->max_children}, listen={$pool->listen}")->implode('; ').'. Shared by every site using this pool.';
                     $metrics = collect([
-                        'load' => ['label' => 'Load (1m)'.($server->cores ? ' / '.$server->cores.' cores' : ''), 'format' => fn ($v) => number_format($v, 2), 'unit' => ''],
+                        'load' => ['label' => 'Load (1m)'.($server->cores ? ' / '.$server->cores.' cores' : ''), 'format' => fn ($v) => number_format($v, 2), 'unit' => '', 'decimals' => 2],
                         'iowait' => ['label' => 'IO wait', 'format' => fn ($v) => number_format($v, 1), 'unit' => '%'],
-                        'steal' => ['label' => 'Steal', 'format' => fn ($v) => number_format($v, 1), 'unit' => '%'],
-                        'swap' => ['label' => 'Swap', 'format' => fn ($v) => $friendlySize($v, 1), 'unit' => ''],
-                        'storage' => ['label' => 'Storage history'.($server->storage->first() ? ' ('.$server->storage->first()->directory.')' : ''), 'format' => fn ($v) => $friendlySize($v, 1), 'unit' => ''],
                         'fpm_workers' => ['label' => 'PHP-FPM workers'.($fpmPools !== '' ? ' · '.$fpmPools : ''), 'format' => fn ($v) => number_format($v), 'unit' => $server->fpm_max_children ? ' / '.$server->fpm_max_children : '', 'title' => $fpmTitle],
                         'fpm_queue' => ['label' => 'Listen queue', 'format' => fn ($v) => number_format($v), 'unit' => '', 'title' => 'Connections waiting for a free PHP-FPM worker (sampled every 15 seconds). '.$fpmTitle],
                     ])->filter(fn ($metric, $key) => $charts[$key]['has_data']);
                 @endphp
                 @if ($metrics->isNotEmpty())
-                    <div wire:key="{{ $slug }}-health" class="{{ $dim }}" style="grid-column: 1 / -1; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid rgba(156, 163, 175, 0.2);">
+                    <div wire:key="{{ $slug }}-health" class="{{ $dim }}" style="grid-column: 1 / -1; contain: inline-size; min-width: 0; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid rgba(156, 163, 175, 0.2);">
                         <div class="flex flex-wrap" style="gap: 0.75rem 2.5rem;">
                             @foreach ($metrics as $key => $metric)
                                 <div wire:key="{{ $slug }}-health-{{ $key }}" class="flex items-center gap-4" @isset($metric['title']) title="{{ $metric['title'] }}" @endisset>
@@ -179,6 +178,7 @@ $rows = ! empty($rows) ? $rows : 1;
                                             max: @js($charts[$key]['max']->values()),
                                             yMax: @js($charts[$key]['y_max']),
                                             unit: @js($metric['unit'] === '%' ? '%' : ''),
+                                            decimals: @js($metric['decimals'] ?? 1),
                                         })"
                                     >
                                         <canvas x-ref="canvas" class="w-full ring-1 ring-gray-900/5 bg-white dark:bg-gray-900 rounded-md shadow-sm"></canvas>
@@ -215,12 +215,40 @@ Alpine.data('serverMetricChart', (config) => ({
             spanGaps: false,
         })
 
+        // Compact tooltip: short local time + one value line, pinned to the top so it fits the small canvas...
+        const tooltipPlugin = Chart.registry?.getPlugin?.('tooltip')
+
+        if (tooltipPlugin?.positioners && ! tooltipPlugin.positioners.pulseTop) {
+            tooltipPlugin.positioners.pulseTop = (items) => items.length ? { x: items[0].element.x, y: 0 } : false
+        }
+
+        const shortTime = (value) => {
+            const parts = String(value).match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/)
+
+            return parts === null
+                ? String(value)
+                : new Date(Date.UTC(+parts[1], +parts[2] - 1, +parts[3], +parts[4], +parts[5], +parts[6]))
+                    .toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+        }
+
+        const format = (value) => {
+            if (value === null || value === undefined) {
+                return '–'
+            }
+
+            if (config.format === 'mb') {
+                return value >= 1024 ? `${(value / 1024).toFixed(1)} GB` : `${Math.round(value)} MB`
+            }
+
+            return `${Number(value).toLocaleString(undefined, { maximumFractionDigits: config.decimals ?? 1 })}${config.unit ?? ''}`
+        }
+
         let chart = new Chart(
             this.$refs.canvas,
             {
                 type: 'line',
                 data: {
-                    labels: config.labels.map(formatDate),
+                    labels: config.labels,
                     datasets: [
                         dataset('Peak', '#c084fc80', 1, config.max),
                         dataset('Average', '#9333ea', 2, config.avg),
@@ -253,11 +281,18 @@ Alpine.data('serverMetricChart', (config) => ({
                         },
                         tooltip: {
                             mode: 'index',
-                            position: 'nearest',
+                            position: tooltipPlugin?.positioners?.pulseTop ? 'pulseTop' : 'nearest',
+                            yAlign: 'top',
                             intersect: false,
+                            padding: 4,
+                            caretSize: 0,
+                            titleMarginBottom: 1,
+                            titleFont: { size: 11, weight: 'bold' },
+                            bodyFont: { size: 11 },
+                            filter: (item) => item.datasetIndex === 1,
                             callbacks: {
-                                title: (items) => items[0]?.label ?? '',
-                                label: (context) => `${context.dataset.label}: ${context.formattedValue}${config.unit}`
+                                title: (items) => items.length ? shortTime(items[0].label) : '',
+                                label: (context) => `avg ${format(context.raw)} · peak ${format(context.chart.data.datasets[0].data[context.dataIndex])}`,
                             },
                             displayColors: false,
                         },
@@ -279,7 +314,7 @@ Alpine.data('serverMetricChart', (config) => ({
                 return
             }
 
-            chart.data.labels = Object.keys(series.avg).map(formatDate)
+            chart.data.labels = Object.keys(series.avg)
             chart.data.datasets[0].data = Object.values(series.max)
             chart.data.datasets[1].data = Object.values(series.avg)
             chart.options.scales.y.max = config.metric === 'cpu' ? 100 : series.y_max

@@ -106,9 +106,6 @@ class Servers
             foreach ([
                 'server_load' => $host['load'] ?? null,
                 'server_iowait' => $host['iowait'] ?? null,
-                'server_steal' => $host['steal'] ?? null,
-                'server_swap' => $host['swap_used'] ?? null,
-                'server_storage' => $storage[0]['used'] ?? null,
                 'fpm_workers' => $fpm === [] ? null : array_sum(array_column($fpm, 'workers')),
                 'fpm_queue' => $fpm === [] ? null : array_sum(array_map(fn ($pool) => $pool['queue'] ?? 0, $fpm)),
             ] as $type => $value) {
@@ -126,18 +123,15 @@ class Servers
                 'cores' => $host['cores'] ?? null,
                 'load' => $host['load'] ?? null,
                 'iowait' => $host['iowait'] ?? null,
-                'steal' => $host['steal'] ?? null,
-                'swap_used' => $host['swap_used'] ?? null,
-                'swap_total' => $host['swap_total'] ?? null,
                 'fpm' => $fpm,
             ], flags: JSON_THROW_ON_ERROR), $event->time);
         });
     }
 
     /**
-     * Fork: Linux host metrics. Load, I/O wait and steal are stored ×100 (0.01 precision).
+     * Fork: Linux host metrics. Load and I/O wait are stored ×100 (0.01 precision).
      *
-     * @return array{cores: ?int, load: ?int, cpu: ?int, iowait: ?int, steal: ?int, swap_used: ?int, swap_total: ?int, fpm: list<array<string, mixed>>}|null
+     * @return array{cores: ?int, load: ?int, cpu: ?int, iowait: ?int, fpm: list<array<string, mixed>>}|null
      */
     protected function hostStats(): ?array
     {
@@ -145,7 +139,7 @@ class Servers
             return null;
         }
 
-        $stats = ['cores' => null, 'load' => null, 'cpu' => null, 'iowait' => null, 'steal' => null, 'swap_used' => null, 'swap_total' => null, 'fpm' => []];
+        $stats = ['cores' => null, 'load' => null, 'cpu' => null, 'iowait' => null, 'fpm' => []];
 
         if (preg_match('/^([\d.]+)\s/', (string) $this->readSystemFile('/proc/loadavg'), $matches)) {
             $stats['load'] = (int) round((float) $matches[1] * 100);
@@ -172,17 +166,9 @@ class Servers
                 }
 
                 $stats['iowait'] = (int) round(max(0, $iowait) / $total * 10_000);
-                $stats['steal'] = (int) round(max(0, $steal) / $total * 10_000);
             }
 
             $this->previousCpuTimes = $current;
-        }
-
-        $meminfo = (string) $this->readSystemFile('/proc/meminfo');
-
-        if (preg_match('/^SwapTotal:\s+(\d+)/m', $meminfo, $total) && preg_match('/^SwapFree:\s+(\d+)/m', $meminfo, $free)) {
-            $stats['swap_total'] = intdiv((int) $total[1], 1024);
-            $stats['swap_used'] = intdiv((int) $total[1] - (int) $free[1], 1024);
         }
 
         $stats['fpm'] = $this->pulse->rescue(fn () => $this->fpmPools()) ?? [];
