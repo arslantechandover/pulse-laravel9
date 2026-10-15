@@ -29,10 +29,11 @@ class Servers extends Card
             $types = ['cpu', 'memory', 'server_load', 'server_iowait', 'fpm_workers', 'fpm_queue'];
             $graphs = $this->graph($types, 'avg');
             $peaks = $this->graph($types, 'max');
+            $queuedSeconds = $this->graph(['fpm_queue_seconds'], 'count');
             $bucketSeconds = (int) ($this->periodAsInterval()->totalSeconds / 60);
 
             return $this->values('system')
-                ->map(function ($system, $slug) use ($graphs, $peaks, $bucketSeconds) {
+                ->map(function ($system, $slug) use ($graphs, $peaks, $queuedSeconds, $bucketSeconds) {
                     if ($this->ignoreSystem($system)) {
                         return null;
                     }
@@ -62,17 +63,30 @@ class Servers extends Card
                             'max' => $max,
                             'current' => $scale($chart['current']),
                             'peak' => $peak,
+                            'period_avg' => ($known = $avg->filter(fn ($value) => $value !== null))->isEmpty() ? null : round($known->avg(), 2),
                             'y_max' => max($chart['y_max'] ?? 0, $peak ?? 0, 1),
                             'has_data' => $chart['current'] !== null || $peak !== null,
                         ];
                     });
 
-                    // Fork: buckets where the FPM pool was saturated (all workers busy or connections queued)...
+                    // Fork: buckets where all workers were busy (saturated) vs. requests queued while the pool was not full...
                     $workersMax = $charts['fpm_workers']['max'];
                     $queueMax = $charts['fpm_queue']['max'];
+                    $queueSeconds = $series('fpm_queue_seconds', $queuedSeconds);
                     $saturated = $workersMax->keys()
-                        ->filter(fn ($bucket) => ($maxChildren > 0 && ($workersMax[$bucket] ?? 0) >= $maxChildren) || ($queueMax[$bucket] ?? 0) > 0)
+                        ->filter(fn ($bucket) => $maxChildren > 0 && ($workersMax[$bucket] ?? 0) >= $maxChildren)
                         ->values();
+                    $queued = $workersMax->keys()
+                        ->filter(fn ($bucket) => (($queueMax[$bucket] ?? 0) > 0 || ($queueSeconds[$bucket] ?? 0) > 0) && ! $saturated->contains($bucket))
+                        ->values();
+                    $range = fn ($buckets) => $buckets->isEmpty() ? null : [
+                        'intervals' => $buckets->count(),
+                        'from' => $buckets->first(),
+                        'to' => CarbonImmutable::createFromFormat('Y-m-d H:i:s', $buckets->last(), 'UTC')->addSeconds($bucketSeconds)->toDateTimeString(),
+                        'queued_seconds' => (int) $buckets->sum(fn ($bucket) => $queueSeconds[$bucket] ?? 0),
+                        'peak_queue' => (int) $buckets->map(fn ($bucket) => $queueMax[$bucket] ?? 0)->max(),
+                        'peak_workers' => (int) $buckets->map(fn ($bucket) => $workersMax[$bucket] ?? 0)->max(),
+                    ];
 
                     return (object) [
                         'name' => (string) $values->name,
@@ -86,11 +100,9 @@ class Servers extends Card
                         'fpm' => $fpm,
                         'fpm_max_children' => $maxChildren,
                         'charts' => $charts,
-                        'saturation' => $saturated->isEmpty() ? null : [
-                            'intervals' => $saturated->count(),
-                            'from' => $saturated->first(),
-                            'to' => CarbonImmutable::createFromFormat('Y-m-d H:i:s', $saturated->last(), 'UTC')->addSeconds($bucketSeconds)->toDateTimeString(),
-                        ],
+                        'queued_seconds' => (int) $queueSeconds->sum(),
+                        'saturation' => $range($saturated),
+                        'queued' => $range($queued),
                         'updated_at' => $updatedAt = CarbonImmutable::createFromTimestamp($system->timestamp),
                         'recently_reported' => $updatedAt->isAfter(now()->subSeconds(30)),
                     ];

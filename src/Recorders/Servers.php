@@ -44,6 +44,20 @@ class Servers
     protected ?array $previousCpuTimes = null;
 
     /**
+     * Fork: PHP-FPM pool definitions, re-read every 15-second window.
+     *
+     * @var array<string, array<string, mixed>>|null
+     */
+    protected ?array $cachedFpmPools = null;
+
+    /**
+     * Fork: 1-second PHP-FPM samples waiting for the next 15-second write.
+     *
+     * @var list<array{time: \Carbon\CarbonImmutable, pools: list<array<string, mixed>>}>
+     */
+    protected array $fpmSamples = [];
+
+    /**
      * Create a new recorder instance.
      */
     public function __construct(
@@ -78,6 +92,9 @@ class Servers
      */
     public function record(SharedBeat $event): void
     {
+        // Fork: PHP-FPM workers and listen queue are sampled on every beat (~1 second) in memory and written with the 15-second batch...
+        $this->sampleFpm($event);
+
         $this->throttle(15, $event, function ($event) {
             $server = $this->config->get('pulse.recorders.'.self::class.'.server_name');
             $slug = Str::slug($server);
@@ -101,18 +118,33 @@ class Servers
                 ->values()
                 ->all();
 
-            $fpm = $host['fpm'] ?? [];
-
             foreach ([
                 'server_load' => $host['load'] ?? null,
                 'server_iowait' => $host['iowait'] ?? null,
-                'fpm_workers' => $fpm === [] ? null : array_sum(array_column($fpm, 'workers')),
-                'fpm_queue' => $fpm === [] ? null : array_sum(array_map(fn ($pool) => $pool['queue'] ?? 0, $fpm)),
             ] as $type => $value) {
                 if ($value !== null) {
                     $this->pulse->record($type, $slug, $value, $event->time)->avg()->max()->onlyBuckets();
                 }
             }
+
+            // Fork: one entry per 1-second FPM sample (aggregated into the same buckets, so avg/max reflect 1-second resolution)...
+            $samples = $this->fpmSamples;
+            $this->fpmSamples = [];
+            $this->cachedFpmPools = null; // re-read the pool configuration for the next window
+
+            foreach ($samples as $sample) {
+                $workers = array_sum(array_column($sample['pools'], 'workers'));
+                $queue = array_sum(array_map(fn ($pool) => $pool['queue'] ?? 0, $sample['pools']));
+
+                $this->pulse->record('fpm_workers', $slug, $workers, $sample['time'])->avg()->max()->onlyBuckets();
+                $this->pulse->record('fpm_queue', $slug, $queue, $sample['time'])->avg()->max()->onlyBuckets();
+
+                if ($queue > 0) {
+                    $this->pulse->record('fpm_queue_seconds', $slug, 1, $sample['time'])->count()->onlyBuckets();
+                }
+            }
+
+            $fpm = $samples === [] ? [] : end($samples)['pools'];
 
             $this->pulse->set('system', $slug, json_encode([
                 'name' => $server,
@@ -131,15 +163,15 @@ class Servers
     /**
      * Fork: Linux host metrics. Load and I/O wait are stored ×100 (0.01 precision).
      *
-     * @return array{cores: ?int, load: ?int, cpu: ?int, iowait: ?int, fpm: list<array<string, mixed>>}|null
+     * @return array{cores: ?int, load: ?int, cpu: ?int, iowait: ?int}|null
      */
     protected function hostStats(): ?array
     {
-        if (! $this->isLinux() || $this->config->get('pulse.recorders.'.self::class.'.host_metrics', true) === false) {
+        if (! $this->hostMetricsEnabled()) {
             return null;
         }
 
-        $stats = ['cores' => null, 'load' => null, 'cpu' => null, 'iowait' => null, 'fpm' => []];
+        $stats = ['cores' => null, 'load' => null, 'cpu' => null, 'iowait' => null];
 
         if (preg_match('/^([\d.]+)\s/', (string) $this->readSystemFile('/proc/loadavg'), $matches)) {
             $stats['load'] = (int) round((float) $matches[1] * 100);
@@ -171,9 +203,38 @@ class Servers
             $this->previousCpuTimes = $current;
         }
 
-        $stats['fpm'] = $this->pulse->rescue(fn () => $this->fpmPools()) ?? [];
-
         return $stats;
+    }
+
+    /**
+     * Fork: determine if the Linux host metrics are enabled.
+     */
+    protected function hostMetricsEnabled(): bool
+    {
+        return $this->isLinux() && $this->config->get('pulse.recorders.'.self::class.'.host_metrics', true) !== false;
+    }
+
+    /**
+     * Fork: take a 1-second PHP-FPM sample (one `ps` and one `ss` call), kept in memory until the next 15-second write.
+     */
+    protected function sampleFpm(SharedBeat $event): void
+    {
+        if (! $this->hostMetricsEnabled() || $this->config->get('pulse.recorders.'.self::class.'.fpm', []) === false) {
+            return;
+        }
+
+        $this->cachedFpmPools ??= $this->pulse->rescue(fn () => $this->fpmPoolDefinitions()) ?? [];
+
+        if ($this->cachedFpmPools === []) {
+            return;
+        }
+
+        $pools = $this->pulse->rescue(fn () => $this->sampleFpmPools($this->cachedFpmPools));
+
+        if ($pools !== null) {
+            $this->fpmSamples[] = ['time' => $event->time, 'pools' => $pools];
+            $this->fpmSamples = array_slice($this->fpmSamples, -120); // bounded if writes are delayed
+        }
     }
 
     /**
@@ -182,6 +243,16 @@ class Servers
      * @return list<array{name: string, pm: ?string, max_children: ?int, listen: ?string, workers: int, queue: ?int}>
      */
     protected function fpmPools(): array
+    {
+        return $this->sampleFpmPools($this->fpmPoolDefinitions());
+    }
+
+    /**
+     * Fork: PHP-FPM pool definitions (name, pm, pm.max_children, listen) of this PHP version from `pool.d/*.conf`.
+     *
+     * @return array<string, array{name: string, pm: ?string, max_children: ?int, listen: ?string, workers: int, queue: ?int}>
+     */
+    protected function fpmPoolDefinitions(): array
     {
         $config = $this->config->get('pulse.recorders.'.self::class.'.fpm', []);
 
@@ -227,11 +298,23 @@ class Servers
             }
         }
 
+        return $pools;
+    }
+
+    /**
+     * Fork: sample the worker count and listen queue of the given pools.
+     *
+     * @param  array<string, array{name: string, pm: ?string, max_children: ?int, listen: ?string, workers: int, queue: ?int}>  $pools
+     * @return list<array{name: string, pm: ?string, max_children: ?int, listen: ?string, workers: int, queue: ?int}>
+     */
+    protected function sampleFpmPools(array $pools): array
+    {
         if ($pools === []) {
             return [];
         }
 
-        $processes = $this->processList($config['process'] ?? "php-fpm{$version}");
+        $config = $this->config->get('pulse.recorders.'.self::class.'.fpm', []);
+        $processes = $this->processList($config['process'] ?? 'php-fpm'.PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION);
 
         foreach ($pools as $name => $pool) {
             $pools[$name]['workers'] = preg_match_all('/^\s*php-fpm: pool '.preg_quote($name, '/').'\s*$/m', $processes);

@@ -145,8 +145,8 @@ $rows = ! empty($rows) ? $rows : 1;
                     $metrics = collect([
                         'load' => ['label' => 'Load (1m)'.($server->cores ? ' / '.$server->cores.' cores' : ''), 'format' => fn ($v) => number_format($v, 2), 'unit' => '', 'decimals' => 2],
                         'iowait' => ['label' => 'IO wait', 'format' => fn ($v) => number_format($v, 1), 'unit' => '%'],
-                        'fpm_workers' => ['label' => 'PHP-FPM workers'.($fpmPools !== '' ? ' · '.$fpmPools : ''), 'format' => fn ($v) => number_format($v), 'unit' => $server->fpm_max_children ? ' / '.$server->fpm_max_children : '', 'title' => $fpmTitle],
-                        'fpm_queue' => ['label' => 'Listen queue', 'format' => fn ($v) => number_format($v), 'unit' => '', 'title' => 'Connections waiting for a free PHP-FPM worker (sampled every 15 seconds). '.$fpmTitle],
+                        'fpm_workers' => ['label' => 'PHP-FPM workers'.($fpmPools !== '' ? ' · '.$fpmPools : ''), 'format' => fn ($v) => number_format($v), 'avg_format' => fn ($v) => number_format($v, 1), 'unit' => $server->fpm_max_children ? ' / '.$server->fpm_max_children : '', 'sample' => '1-second', 'title' => 'Worker processes, sampled every second. '.$fpmTitle],
+                        'fpm_queue' => ['label' => 'Listen queue', 'format' => fn ($v) => number_format($v), 'avg_format' => fn ($v) => number_format($v, 1), 'unit' => '', 'sample' => '1-second', 'title' => 'Requests waiting for a free PHP-FPM worker at the same moment, sampled every second. '.$fpmTitle],
                     ])->filter(fn ($metric, $key) => $charts[$key]['has_data']);
                 @endphp
                 @if ($metrics->isNotEmpty())
@@ -163,7 +163,15 @@ $rows = ! empty($rows) ? $rows : 1;
                                             @endif
                                         </div>
                                         @if ($charts[$key]['peak'] !== null)
-                                            <div class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap tabular-nums" title="Highest 15-second sample in the selected period">peak {{ ($metric['format'])($charts[$key]['peak']) }}{{ $metric['unit'] === '%' ? '%' : '' }}</div>
+                                            <div class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap tabular-nums" title="{{ isset($metric['avg_format']) ? 'Average and highest' : 'Highest' }} {{ $metric['sample'] ?? '15-second' }} sample in the selected period">
+                                                @isset($metric['avg_format'])
+                                                    avg {{ $charts[$key]['period_avg'] === null ? '—' : ($metric['avg_format'])($charts[$key]['period_avg']) }} &middot;
+                                                @endisset
+                                                peak {{ ($metric['format'])($charts[$key]['peak']) }}{{ $metric['unit'] === '%' ? '%' : '' }}
+                                            </div>
+                                        @endif
+                                        @if ($key === 'fpm_queue')
+                                            <div class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap tabular-nums" title="Seconds in the selected period in which at least one request was waiting for a worker (1-second samples)">queued {{ number_format($server->queued_seconds) }}s</div>
                                         @endif
                                     </div>
                                     <div
@@ -188,8 +196,14 @@ $rows = ! empty($rows) ? $rows : 1;
                         </div>
                         @if ($server->saturation)
                             <div wire:key="{{ $slug }}-saturation" class="mt-2 text-sm font-medium" style="color: #ef4444;">
-                                &#9888; PHP-FPM saturated (all {{ $server->fpm_max_children }} workers busy or requests queued) in {{ $server->saturation['intervals'] }} {{ $server->saturation['intervals'] === 1 ? 'interval' : 'intervals' }}:
+                                &#9888; PHP-FPM saturated: all {{ $server->fpm_max_children }} workers busy in {{ $server->saturation['intervals'] }} {{ $server->saturation['intervals'] === 1 ? 'interval' : 'intervals' }}{{ $server->saturation['peak_queue'] > 0 ? ' (peak '.$server->saturation['peak_queue'].' waiting, queued '.$server->saturation['queued_seconds'].'s)' : '' }}:
                                 <span x-text="formatDate('{{ $server->saturation['from'] }}')"></span> &ndash; <span x-text="formatDate('{{ $server->saturation['to'] }}')"></span>
+                            </div>
+                        @endif
+                        @if ($server->queued)
+                            <div wire:key="{{ $slug }}-queued" class="mt-2 text-sm font-medium" style="color: #f59e0b;">
+                                &#9888; Requests waited for a PHP-FPM worker in {{ $server->queued['intervals'] }} {{ $server->queued['intervals'] === 1 ? 'interval' : 'intervals' }} while the pool was not full (peak {{ $server->queued['peak_queue'] }} waiting, queued {{ $server->queued['queued_seconds'] }}s, workers peaked at {{ $server->queued['peak_workers'] }}{{ $server->fpm_max_children ? '/'.$server->fpm_max_children : '' }}):
+                                <span x-text="formatDate('{{ $server->queued['from'] }}')"></span> &ndash; <span x-text="formatDate('{{ $server->queued['to'] }}')"></span>
                             </div>
                         @endif
                     </div>
