@@ -1,5 +1,5 @@
 @php
-$friendlySize = function(int $mb, int $precision = 0) {
+$friendlySize = function(int|float $mb, int $precision = 0) {
     if ($mb >= 1024 * 1024) {
         return round($mb / 1024 / 1024, $precision) . 'TB';
     }
@@ -38,7 +38,12 @@ $rows = ! empty($rows) ? $rows : 1;
             <div></div>
             <div class="text-xs uppercase text-left text-gray-500 dark:text-gray-400 font-bold">Storage</div>
             @foreach ($servers as $slug => $server)
-                <div wire:key="{{ $slug }}-indicator" class="flex items-center {{ $servers->count() > 1 ? 'py-2' : '' }}" title="{{ $server->updated_at->fromNow() }}">
+                @php
+                    $charts = $server->charts;
+                    $dim = ! $server->recently_reported ? 'opacity-25 animate-pulse' : '';
+                    $pad = $servers->count() > 1 ? 'py-2' : '';
+                @endphp
+                <div wire:key="{{ $slug }}-indicator" class="flex items-center {{ $pad }}" title="{{ $server->updated_at->fromNow() }}">
                     @if ($server->recently_reported)
                         <div class="w-5 flex justify-center mr-1">
                             <div class="h-1 w-1 bg-green-500 rounded-full animate-pulse"></div>
@@ -47,29 +52,38 @@ $rows = ! empty($rows) ? $rows : 1;
                         <x-pulse::icons.signal-slash class="w-5 h-5 stroke-red-500 mr-1" />
                     @endif
                 </div>
-                <div wire:key="{{ $slug }}-name" class="flex items-center pr-8 xl:pr-12 {{ $servers->count() > 1 ? 'py-2' : '' }} {{ ! $server->recently_reported ? 'opacity-25 animate-pulse' : '' }}">
+                <div wire:key="{{ $slug }}-name" class="flex items-center pr-8 xl:pr-12 {{ $pad }} {{ $dim }}">
                     <x-pulse::icons.server class="w-6 h-6 mr-2 stroke-gray-500 dark:stroke-gray-400" />
                     <span class="text-base font-bold text-gray-600 dark:text-gray-300" x-bind:title="`Time: {{ number_format($time) }}ms; Run at: ${formatDate('{{ $runAt }}')};`">{{ $server->name }}</span>
                 </div>
-                <div wire:key="{{ $slug }}-cpu" class="flex items-center {{ $servers->count() > 1 ? 'py-2' : '' }} {{ ! $server->recently_reported ? 'opacity-25 animate-pulse' : '' }}">
-                    <div class="text-xl font-bold text-gray-700 dark:text-gray-200 w-14 whitespace-nowrap tabular-nums">
-                        {{ $server->cpu_current }}%
+                <div wire:key="{{ $slug }}-cpu" class="flex items-center {{ $pad }} {{ $dim }}">
+                    <div class="flex flex-col">
+                        <div class="text-xl font-bold text-gray-700 dark:text-gray-200 w-14 whitespace-nowrap tabular-nums">
+                            {{ $server->cpu_current }}%
+                        </div>
+                        @if ($charts['cpu']['peak'] !== null)
+                            <div class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap tabular-nums" title="Highest 15-second sample in the selected period">peak {{ round($charts['cpu']['peak']) }}%</div>
+                        @endif
                     </div>
                 </div>
-                <div wire:key="{{ $slug }}-cpu-graph" class="flex items-center pr-8 xl:pr-12 {{ $servers->count() > 1 ? 'py-2' : '' }} {{ ! $server->recently_reported ? 'opacity-25 animate-pulse' : '' }}">
+                <div wire:key="{{ $slug }}-cpu-graph" class="flex items-center pr-8 xl:pr-12 {{ $pad }} {{ $dim }}">
                     <div
                         wire:ignore
                         class="w-full min-w-[5rem] max-w-xs h-9 relative"
-                        x-data="cpuChart({
+                        x-data="serverMetricChart({
                             slug: '{{ $slug }}',
-                            labels: @js($server->cpu->keys()),
-                            data: @js($server->cpu->values()),
+                            metric: 'cpu',
+                            labels: @js($charts['cpu']['avg']->keys()),
+                            avg: @js($charts['cpu']['avg']->values()),
+                            max: @js($charts['cpu']['max']->values()),
+                            yMax: 100,
+                            unit: '%',
                         })"
                     >
                         <canvas x-ref="canvas" class="w-full ring-1 ring-gray-900/5 bg-white dark:bg-gray-900 rounded-md shadow-sm"></canvas>
                     </div>
                 </div>
-                <div wire:key="{{ $slug }}-memory" class="flex items-center {{ $servers->count() > 1 ? 'py-2' : '' }} {{ ! $server->recently_reported ? 'opacity-25 animate-pulse' : '' }}">
+                <div wire:key="{{ $slug }}-memory" class="flex items-center {{ $pad }} {{ $dim }}">
                     <div class="w-36 flex-shrink-0 whitespace-nowrap tabular-nums">
                         <span class="text-xl font-bold text-gray-700 dark:text-gray-200">
                             {{ $friendlySize($server->memory_current, 1) }}
@@ -77,23 +91,29 @@ $rows = ! empty($rows) ? $rows : 1;
                         <span class="text-sm font-medium text-gray-500 dark:text-gray-400">
                             / {{ $friendlySize($server->memory_total, 1) }}
                         </span>
+                        @if ($charts['memory']['peak'] !== null)
+                            <div class="text-xs text-gray-500 dark:text-gray-400" title="Highest 15-second sample in the selected period">peak {{ $friendlySize($charts['memory']['peak'], 1) }}</div>
+                        @endif
                     </div>
                 </div>
-                <div wire:key="{{ $slug }}-memory-graph" class="flex items-center pr-8 xl:pr-12 {{ $servers->count() > 1 ? 'py-2' : '' }} {{ ! $server->recently_reported ? 'opacity-25 animate-pulse' : '' }}">
+                <div wire:key="{{ $slug }}-memory-graph" class="flex items-center pr-8 xl:pr-12 {{ $pad }} {{ $dim }}">
                     <div
                         wire:ignore
                         class="w-full min-w-[5rem] max-w-xs h-9 relative"
-                        x-data="memoryChart({
+                        x-data="serverMetricChart({
                             slug: '{{ $slug }}',
-                            labels: @js($server->memory->keys()),
-                            data: @js($server->memory->values()),
-                            total: @js($server->memory_total),
+                            metric: 'memory',
+                            labels: @js($charts['memory']['avg']->keys()),
+                            avg: @js($charts['memory']['avg']->values()),
+                            max: @js($charts['memory']['max']->values()),
+                            yMax: @js($server->memory_total),
+                            unit: ' MB',
                         })"
                     >
                         <canvas x-ref="canvas" class="w-full ring-1 ring-gray-900/5 bg-white dark:bg-gray-900 rounded-md shadow-sm"></canvas>
                     </div>
                 </div>
-                <div wire:key="{{ $slug }}-storage" class="flex items-center gap-8 {{ $servers->count() > 1 ? 'py-2' : '' }} {{ ! $server->recently_reported ? 'opacity-25 animate-pulse' : '' }}">
+                <div wire:key="{{ $slug }}-storage" class="flex items-center gap-8 {{ $pad }} {{ $dim }}">
                     @foreach ($server->storage as $storage)
                         <div wire:key="{{ $slug.'-storage-'.$storage->directory }}" class="flex items-center gap-4" title="Directory: {{ $storage->directory }}">
                             <div class="whitespace-nowrap tabular-nums">
@@ -115,6 +135,65 @@ $rows = ! empty($rows) ? $rows : 1;
                         </div>
                     @endforeach
                 </div>
+
+                {{-- Fork: host & PHP-FPM health row --}}
+                @php
+                    $fpmPools = $server->fpm->pluck('name')->implode(', ');
+                    $fpmTitle = $server->fpm->map(fn ($pool) => "pool {$pool->name}: pm={$pool->pm}, max_children={$pool->max_children}, listen={$pool->listen}")->implode('; ').'. Shared by every site using this pool.';
+                    $metrics = collect([
+                        'load' => ['label' => 'Load (1m)'.($server->cores ? ' / '.$server->cores.' cores' : ''), 'format' => fn ($v) => number_format($v, 2), 'unit' => ''],
+                        'iowait' => ['label' => 'IO wait', 'format' => fn ($v) => number_format($v, 1), 'unit' => '%'],
+                        'steal' => ['label' => 'Steal', 'format' => fn ($v) => number_format($v, 1), 'unit' => '%'],
+                        'swap' => ['label' => 'Swap', 'format' => fn ($v) => $friendlySize($v, 1), 'unit' => ''],
+                        'storage' => ['label' => 'Storage history'.($server->storage->first() ? ' ('.$server->storage->first()->directory.')' : ''), 'format' => fn ($v) => $friendlySize($v, 1), 'unit' => ''],
+                        'fpm_workers' => ['label' => 'PHP-FPM workers'.($fpmPools !== '' ? ' · '.$fpmPools : ''), 'format' => fn ($v) => number_format($v), 'unit' => $server->fpm_max_children ? ' / '.$server->fpm_max_children : '', 'title' => $fpmTitle],
+                        'fpm_queue' => ['label' => 'Listen queue', 'format' => fn ($v) => number_format($v), 'unit' => '', 'title' => 'Connections waiting for a free PHP-FPM worker (sampled every 15 seconds). '.$fpmTitle],
+                    ])->filter(fn ($metric, $key) => $charts[$key]['has_data']);
+                @endphp
+                @if ($metrics->isNotEmpty())
+                    <div wire:key="{{ $slug }}-health" class="{{ $dim }}" style="grid-column: 1 / -1; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid rgba(156, 163, 175, 0.2);">
+                        <div class="flex flex-wrap" style="gap: 0.75rem 2.5rem;">
+                            @foreach ($metrics as $key => $metric)
+                                <div wire:key="{{ $slug }}-health-{{ $key }}" class="flex items-center gap-4" @isset($metric['title']) title="{{ $metric['title'] }}" @endisset>
+                                    <div class="flex flex-col" style="min-width: 7.5rem;">
+                                        <div class="text-xs uppercase text-gray-500 dark:text-gray-400 font-bold whitespace-nowrap">{{ $metric['label'] }}</div>
+                                        <div class="whitespace-nowrap tabular-nums">
+                                            <span class="text-xl font-bold text-gray-700 dark:text-gray-200">{{ $charts[$key]['current'] === null ? '—' : ($metric['format'])($charts[$key]['current']) }}{{ $metric['unit'] === '%' ? '%' : '' }}</span>
+                                            @if ($metric['unit'] !== '' && $metric['unit'] !== '%')
+                                                <span class="text-sm font-medium text-gray-500 dark:text-gray-400">{{ $metric['unit'] }}</span>
+                                            @endif
+                                        </div>
+                                        @if ($charts[$key]['peak'] !== null)
+                                            <div class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap tabular-nums" title="Highest 15-second sample in the selected period">peak {{ ($metric['format'])($charts[$key]['peak']) }}{{ $metric['unit'] === '%' ? '%' : '' }}</div>
+                                        @endif
+                                    </div>
+                                    <div
+                                        wire:ignore
+                                        class="h-9 relative"
+                                        style="width: 9rem;"
+                                        x-data="serverMetricChart({
+                                            slug: '{{ $slug }}',
+                                            metric: '{{ $key }}',
+                                            labels: @js($charts[$key]['avg']->keys()),
+                                            avg: @js($charts[$key]['avg']->values()),
+                                            max: @js($charts[$key]['max']->values()),
+                                            yMax: @js($charts[$key]['y_max']),
+                                            unit: @js($metric['unit'] === '%' ? '%' : ''),
+                                        })"
+                                    >
+                                        <canvas x-ref="canvas" class="w-full ring-1 ring-gray-900/5 bg-white dark:bg-gray-900 rounded-md shadow-sm"></canvas>
+                                    </div>
+                                </div>
+                            @endforeach
+                        </div>
+                        @if ($server->saturation)
+                            <div wire:key="{{ $slug }}-saturation" class="mt-2 text-sm font-medium" style="color: #ef4444;">
+                                &#9888; PHP-FPM saturated (all {{ $server->fpm_max_children }} workers busy or requests queued) in {{ $server->saturation['intervals'] }} {{ $server->saturation['intervals'] === 1 ? 'interval' : 'intervals' }}:
+                                <span x-text="formatDate('{{ $server->saturation['from'] }}')"></span> &ndash; <span x-text="formatDate('{{ $server->saturation['to'] }}')"></span>
+                            </div>
+                        @endif
+                    </div>
+                @endif
             @endforeach
         </div>
     @endif
@@ -122,88 +201,20 @@ $rows = ! empty($rows) ? $rows : 1;
 
 @script
 <script>
-Alpine.data('cpuChart', (config) => ({
+Alpine.data('serverMetricChart', (config) => ({
     init() {
-        let chart = new Chart(
-            this.$refs.canvas,
-            {
-                type: 'line',
-                data: {
-                    labels: config.labels.map(formatDate),
-                    datasets: [
-                        {
-                            label: 'CPU Percent',
-                            borderColor: '#9333ea',
-                            borderWidth: 2,
-                            borderCapStyle: 'round',
-                            data: config.data,
-                            pointHitRadius: 10,
-                            pointStyle: false,
-                            tension: 0.2,
-                            spanGaps: false,
-                        },
-                    ],
-                },
-                options: {
-                    maintainAspectRatio: false,
-                    layout: {
-                        autoPadding: false,
-                    },
-                    scales: {
-                        x: {
-                            display: false,
-                            grid: {
-                                display: false,
-                            },
-                        },
-                        y: {
-                            display: false,
-                            min: 0,
-                            max: 100,
-                            grid: {
-                                display: false,
-                            },
-                        },
-                    },
-                    plugins: {
-                        legend: {
-                            display: false,
-                        },
-                        tooltip: {
-                            mode: 'index',
-                            position: 'nearest',
-                            intersect: false,
-                            callbacks: {
-                                title: () => '',
-                                label: (context) => `${context.label} - ${context.formattedValue}%`
-                            },
-                            displayColors: false,
-                        },
-                    },
-                },
-            }
-        )
-
-        Livewire.on('servers-chart-update', ({ servers }) => {
-            if (chart === undefined) {
-                return
-            }
-
-            if (servers[config.slug] === undefined && chart) {
-                chart.destroy()
-                chart = undefined
-                return
-            }
-
-            chart.data.labels = Object.keys(servers[config.slug].cpu).map(formatDate)
-            chart.data.datasets[0].data = Object.values(servers[config.slug].cpu)
-            chart.update()
+        const dataset = (label, color, width, data) => ({
+            label,
+            borderColor: color,
+            borderWidth: width,
+            borderCapStyle: 'round',
+            data,
+            pointHitRadius: 10,
+            pointStyle: false,
+            tension: 0.2,
+            spanGaps: false,
         })
-    }
-}))
 
-Alpine.data('memoryChart', (config) => ({
-    init() {
         let chart = new Chart(
             this.$refs.canvas,
             {
@@ -211,17 +222,8 @@ Alpine.data('memoryChart', (config) => ({
                 data: {
                     labels: config.labels.map(formatDate),
                     datasets: [
-                        {
-                            label: 'Memory Used',
-                            borderColor: '#9333ea',
-                            borderWidth: 2,
-                            borderCapStyle: 'round',
-                            data: config.data,
-                            pointHitRadius: 10,
-                            pointStyle: false,
-                            tension: 0.2,
-                            spanGaps: false,
-                        },
+                        dataset('Peak', '#c084fc80', 1, config.max),
+                        dataset('Average', '#9333ea', 2, config.avg),
                     ],
                 },
                 options: {
@@ -239,7 +241,7 @@ Alpine.data('memoryChart', (config) => ({
                         y: {
                             display: false,
                             min: 0,
-                            max: config.total,
+                            max: config.yMax,
                             grid: {
                                 display: false,
                             },
@@ -254,8 +256,8 @@ Alpine.data('memoryChart', (config) => ({
                             position: 'nearest',
                             intersect: false,
                             callbacks: {
-                                title: () => '',
-                                label: (context) => `${context.label} - ${context.formattedValue} MB`
+                                title: (items) => items[0]?.label ?? '',
+                                label: (context) => `${context.dataset.label}: ${context.formattedValue}${config.unit}`
                             },
                             displayColors: false,
                         },
@@ -269,14 +271,18 @@ Alpine.data('memoryChart', (config) => ({
                 return
             }
 
-            if (servers[config.slug] === undefined && chart) {
+            const series = servers[config.slug]?.charts?.[config.metric]
+
+            if (series === undefined && chart) {
                 chart.destroy()
                 chart = undefined
                 return
             }
 
-            chart.data.labels = Object.keys(servers[config.slug].memory).map(formatDate)
-            chart.data.datasets[0].data = Object.values(servers[config.slug].memory)
+            chart.data.labels = Object.keys(series.avg).map(formatDate)
+            chart.data.datasets[0].data = Object.values(series.max)
+            chart.data.datasets[1].data = Object.values(series.avg)
+            chart.options.scales.y.max = config.metric === 'cpu' ? 100 : series.y_max
             chart.update()
         })
     }
