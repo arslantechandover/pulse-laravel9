@@ -103,7 +103,8 @@ class SlowRequests extends Card
         $maxima = $this->aggregateTypes($types, 'max', limit: 1000)->keyBy('key');
         $counts = $this->aggregateTypes(['slow_client_request'], 'count', limit: 1000)->keyBy('key');
 
-        return $counts->filter(fn ($row) => ($row->slow_client_request ?? 0) > 0)->map(function ($row, $key) use ($sums, $maxima) {
+        // Rows without a resolvable key (v1.4.7.9 recorded only buckets for endpoints slow only for the client) are skipped...
+        return $counts->filter(fn ($row, $key) => $key !== '' && ($row->slow_client_request ?? 0) > 0)->map(function ($row, $key) use ($sums, $maxima) {
             $requests = (int) $row->slow_client_request;
             $part = fn (string $type) => [
                 'avg' => isset($sums->get($key)->{$type}) ? round($sums->get($key)->{$type} / $requests, 1) : null,

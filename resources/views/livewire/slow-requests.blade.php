@@ -97,8 +97,13 @@
                                 @endif
                             </x-pulse::td>
                             <x-pulse::td numeric class="text-gray-700 dark:text-gray-300">
-                                @if ($slowRequest->slowest === null && $slowRequest->client)
-                                    <span title="Not slow on the server; see the client line">&mdash;</span>
+                                @if (($slowRequest->client['total']['max'] ?? null) !== null)
+                                    <span title="Slowest client time (web server: first request byte received → last response byte sent, incl. download){{ $slowRequest->slowest === null ? '; not slow on the server' : '; slowest server time '.number_format($slowRequest->slowest).' ms (may be a different request)' }}">
+                                        <strong>{{ number_format($slowRequest->client['total']['max']) }}</strong> ms
+                                    </span>
+                                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                                        server {!! $slowRequest->slowest === null ? '&mdash;' : e(number_format($slowRequest->slowest)).' ms' !!}
+                                    </p>
                                 @elseif ($slowRequest->slowest === null)
                                     <strong>Unknown</strong>
                                 @else

@@ -58,7 +58,10 @@ class TagClientRequests
                     unset($timing['q'], $timing['p']);
                 }
 
-                $value = rawurlencode(json_encode(['k' => [$request->method(), $path, $via], ...$timing], flags: JSON_THROW_ON_ERROR));
+                // The same user ID the Slow User Requests / Application Usage cards use (none for guests)...
+                $user = $this->pulse->resolveAuthenticatedUserId();
+
+                $value = rawurlencode(json_encode(['k' => [$request->method(), $path, $via], ...$timing, ...($user === null ? [] : ['u' => $user])], flags: JSON_THROW_ON_ERROR));
 
                 if (strlen($value) <= 1500) {
                     $response->headers->set(ClientRequests::HEADER, $value);

@@ -6,6 +6,7 @@ use Illuminate\Contracts\Support\Renderable;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\View;
 use Laravel\Pulse\Facades\Pulse;
+use Laravel\Pulse\Recorders\ClientRequests;
 use Laravel\Pulse\Recorders\Concerns\Thresholds;
 use Laravel\Pulse\Recorders\SlowRequests;
 use Livewire\Attributes\Lazy;
@@ -29,24 +30,41 @@ class SlowUserRequests extends Card
     public function render(): Renderable
     {
         [$slowUserRequests, $time, $runAt] = $this->remember(function () {
-            $counts = $this->aggregate('slow_user_request', 'count', limit: 10);
+            // Fork: with client timing enabled, also count requests that were slow only for the client and show the
+            // slowest client total (see ClientRequests::recordUser())...
+            $client = (bool) Config::get('pulse.recorders.'.ClientRequests::class.'.enabled');
+
+            $counts = $client
+                ? $this->aggregateTypes(['slow_user_request', 'slow_client_user_request'], 'count', limit: 1000)
+                    ->map(fn ($row) => (object) ['key' => $row->key, 'count' => (int) ($row->slow_user_request ?? 0) + (int) ($row->slow_client_user_request ?? 0)])
+                    ->filter(fn ($row) => $row->key !== null && $row->count > 0)
+                    ->sortByDesc('count')
+                    ->take(10)
+                    ->values()
+                : $this->aggregate('slow_user_request', 'count', limit: 10);
 
             $userKeys = $counts->pluck('key')->map(fn ($key) => (string) $key);
 
-            $endpoints = $this->aggregate('slow_user_endpoint', ['max', 'count'], 'max', limit: 1000)
-                ->map(function ($row) {
-                    [$userKey, $method, $uri] = json_decode($row->key, flags: JSON_THROW_ON_ERROR);
+            $server = $this->aggregate('slow_user_endpoint', ['max', 'count'], 'max', limit: 1000)->keyBy('key');
+            $clientSlowest = $client ? $this->aggregateTypes(['slow_client_user_endpoint'], 'max', limit: 1000)->keyBy('key') : collect();
+            $clientOnly = $client ? $this->aggregateTypes(['slow_client_user_endpoint_only'], 'count', limit: 1000)->keyBy('key') : collect();
+
+            $endpoints = $server->keys()->merge($clientSlowest->keys())->filter(fn ($key) => $key !== '')->unique()
+                ->map(function ($key) use ($server, $clientSlowest, $clientOnly) {
+                    [$userKey, $method, $uri] = json_decode($key, flags: JSON_THROW_ON_ERROR);
 
                     return (object) [
                         'user_key' => (string) $userKey,
                         'method' => $method,
                         'uri' => $uri,
-                        'count' => (int) $row->count,
-                        'slowest' => $row->max,
+                        'count' => (int) ($server->get($key)?->count ?? 0) + (int) ($clientOnly->get($key)?->slow_client_user_endpoint_only ?? 0),
+                        'slowest' => $server->get($key)?->max,
+                        'client_slowest' => $clientSlowest->get($key)?->slow_client_user_endpoint,
                         'threshold' => $this->threshold($uri, SlowRequests::class),
                     ];
                 })
                 ->whereIn('user_key', $userKeys->all())
+                ->sortByDesc(fn ($endpoint) => max($endpoint->slowest ?? 0, $endpoint->client_slowest ?? 0))
                 ->groupBy('user_key');
 
             $users = Pulse::resolveUsers($counts->pluck('key'));
@@ -59,6 +77,7 @@ class SlowUserRequests extends Card
                     'user' => $users->find($row->key),
                     'count' => (int) $row->count,
                     'slowest' => $userEndpoints->max('slowest'),
+                    'client_slowest' => $userEndpoints->max('client_slowest'),
                     'endpoints' => $userEndpoints,
                 ];
             });

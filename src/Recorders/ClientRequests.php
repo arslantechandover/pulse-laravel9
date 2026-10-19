@@ -143,13 +143,49 @@ class ClientRequests
         }
 
         $parts = $this->breakdown($total, (float) $line['t'] - (float) $line['rt'], $header, $line);
+        [$method, $path] = $key;
         $key = json_encode($key, flags: JSON_THROW_ON_ERROR);
         $timestamp = (int) floor((float) $line['t'] - (float) $line['rt']);
 
-        $this->pulse->record('slow_client_request', $key, $total, $timestamp)->sum()->max()->count()->onlyBuckets();
+        // Recorded with an entry (not only buckets): Pulse resolves a key's text from pulse_entries, so endpoints that are
+        // slow only for the client need an entry of their own...
+        $this->pulse->record('slow_client_request', $key, $total, $timestamp)->sum()->max()->count();
 
         foreach ($parts as $part => $value) {
             $this->pulse->record("slow_client_request_{$part}", $key, $value, $timestamp)->sum()->max()->onlyBuckets();
+        }
+
+        if (is_string($user = $header['u'] ?? null) || is_int($user)) {
+            $this->recordUser((string) $user, $method, $path, $total, $parts, $timestamp);
+        }
+    }
+
+    /**
+     * Record the request for the Slow User Requests and Application Usage cards.
+     *
+     * The slowest client total is recorded for every slow client request. The count only includes requests that were
+     * slow for the client but not on the server: those that were slow on the server are already counted by the
+     * SlowRequests recorder (`slow_user_request` / `slow_user_endpoint`), so nothing is counted twice.
+     *
+     * @param  array<string, int>  $parts
+     */
+    protected function recordUser(string $user, string $method, string $path, int $total, array $parts, int $timestamp): void
+    {
+        if ($user === '') {
+            return;
+        }
+
+        $endpoint = json_encode([$user, $method, $path], flags: JSON_THROW_ON_ERROR);
+
+        $this->pulse->record('slow_client_user_endpoint', $endpoint, $total, $timestamp)->max(); // with an entry, for the key
+
+        $server = $parts['queue'] + $parts['db'] + $parts['http'] + $parts['app'];
+        $serverCounted = Config::get('pulse.recorders.'.SlowRequests::class.'.enabled', true)
+            && $server >= $this->threshold($path, SlowRequests::class);
+
+        if (! $serverCounted) {
+            $this->pulse->record('slow_client_user_request', $user, timestamp: $timestamp)->count(); // with an entry, for the key
+            $this->pulse->record('slow_client_user_endpoint_only', $endpoint, timestamp: $timestamp)->count()->onlyBuckets();
         }
     }
 
