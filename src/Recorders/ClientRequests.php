@@ -144,8 +144,14 @@ class ClientRequests
 
         $parts = $this->breakdown($total, (float) $line['t'] - (float) $line['rt'], $header, $line);
         [$method, $path] = $key;
-        $key = json_encode($key, flags: JSON_THROW_ON_ERROR);
+        $user = $header['u'] ?? null;
+        $user = is_string($user) || is_int($user) ? (string) $user : null;
         $timestamp = (int) floor((float) $line['t'] - (float) $line['rt']);
+
+        // One entry per slow request with its own breakdown (no aggregates), for the Slowest / Latest hover breakdowns...
+        $this->pulse->record('slow_client_request_detail', json_encode(['k' => $key, 'u' => $user, 'p' => $parts], flags: JSON_THROW_ON_ERROR), $total, $timestamp);
+
+        $key = json_encode($key, flags: JSON_THROW_ON_ERROR);
 
         // Recorded with an entry (not only buckets): Pulse resolves a key's text from pulse_entries, so endpoints that are
         // slow only for the client need an entry of their own...
@@ -155,8 +161,8 @@ class ClientRequests
             $this->pulse->record("slow_client_request_{$part}", $key, $value, $timestamp)->sum()->max()->onlyBuckets();
         }
 
-        if (is_string($user = $header['u'] ?? null) || is_int($user)) {
-            $this->recordUser((string) $user, $method, $path, $total, $parts, $timestamp);
+        if ($user !== null) {
+            $this->recordUser($user, $method, $path, $total, $parts, $timestamp);
         }
     }
 

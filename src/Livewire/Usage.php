@@ -70,12 +70,15 @@ class Usage extends Card
                 $latest = $type === 'slow_requests'
                     ? $this->latestByUser($this->latestSlowRequests('slow_user_endpoint', 'slow_client_user_endpoint'))
                     : collect();
+                $latestDetails = $type === 'slow_requests'
+                    ? $this->slowestAndLatestDetails($this->clientRequestDetails()->filter(fn ($detail) => $detail['user'] !== null), fn ($detail) => $detail['user'])[1]
+                    : collect();
 
                 return $counts->map(fn ($row) => (object) [
                     'key' => $row->key,
                     'user' => $users->find($row->key),
                     'count' => (int) $row->count,
-                    'latest' => $latest->get((string) $row->key),
+                    'latest' => $this->withLatestBreakdown($latest->get((string) $row->key), $latestDetails->get((string) $row->key)),
                 ]);
             },
             $type

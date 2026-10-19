@@ -56,20 +56,30 @@ class SlowRequests extends Card
                 // Fork: the latest slow request per endpoint (from the stored per-request entries)...
                 $latest = $this->latestSlowRequests('slow_request', 'slow_client_request');
 
-                return $rows->keys()->merge($client->keys())->unique()->map(function ($key) use ($rows, $client, $sums, $maxima, $counts, $latest) {
+                // Fork: the breakdown of the slowest and the latest request per endpoint...
+                [$slowestDetails, $latestDetails] = $this->slowestAndLatestDetails($this->clientRequestDetails(), fn ($detail) => $detail['endpoint']);
+
+                return $rows->keys()->merge($client->keys())->unique()->map(function ($key) use ($rows, $client, $sums, $maxima, $counts, $latest, $slowestDetails, $latestDetails) {
                     [$method, $uri, $action] = json_decode($key, flags: JSON_THROW_ON_ERROR);
                     $row = $rows->get($key);
+                    $clientRow = $client->get($key);
+                    $slowestDetail = $slowestDetails->get($key);
 
                     return (object) [
                         'uri' => $uri,
                         'method' => $method,
                         'action' => $action,
-                        'count' => $row?->count,
+                        // With client timing, the count is the number of requests slow for the client (every request that
+                        // is slow on the server is too; max() keeps server-slow requests whose client line was lost)...
+                        'count' => $clientRow === null ? $row?->count : max((int) ($row?->count ?? 0), $clientRow['requests']),
                         'slowest' => $row?->max,
                         'threshold' => $this->threshold($uri, SlowRequestsRecorder::class),
                         'breakdown' => $this->breakdown($sums->get($key), $maxima->get($key), $counts->get($key)),
-                        'client' => $client->get($key),
-                        'latest' => $latest->get($key),
+                        'client' => $clientRow,
+                        'slowest_breakdown' => $slowestDetail !== null && $clientRow !== null && (int) $clientRow['total']['max'] === $slowestDetail['total']
+                            ? static::clientBreakdownText($slowestDetail['parts'], $slowestDetail['total'])
+                            : null,
+                        'latest' => $this->withLatestBreakdown($latest->get($key), $latestDetails->get($key)),
                     ];
                 })->sortByDesc(fn ($row) => match ($this->orderBy) {
                     'count' => [$row->count ?? 0, $row->client['requests'] ?? 0],
@@ -115,10 +125,22 @@ class SlowRequests extends Card
                 'max' => isset($maxima->get($key)->{$type}) ? (float) $maxima->get($key)->{$type} : null,
             ];
 
-            return [
+            $client = [
                 'requests' => $requests,
                 'total' => $part('slow_client_request'),
                 ...collect(ClientRequestsRecorder::PARTS)->mapWithKeys(fn ($name) => [$name => $part("slow_client_request_{$name}")])->all(),
+            ];
+
+            // Whole-ms average parts adding up exactly to the shown average total (download is the remainder)...
+            [$averageParts, $averageTotal] = static::roundedAverageParts(
+                collect(ClientRequestsRecorder::PARTS)->mapWithKeys(fn ($name) => [$name => $client[$name]['avg']])->all(),
+                (float) $client['total']['avg'],
+            );
+
+            return $client + [
+                'average_parts' => $averageParts,
+                'average_total' => $averageTotal,
+                'average_server' => $averageParts['queue'] + $averageParts['db'] + $averageParts['http'] + $averageParts['app'],
             ];
         });
     }

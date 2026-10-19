@@ -66,7 +66,7 @@
                             </x-pulse::td>
                             <x-pulse::td numeric class="text-gray-700 dark:text-gray-300">
                                 @if (($slowUserRequest->client_slowest ?? null) !== null)
-                                    <span title="Slowest client time (web server: first request byte received → last response byte sent, incl. download){{ $slowUserRequest->slowest === null ? '; not slow on the server' : '; slowest server time '.number_format($slowUserRequest->slowest).' ms (may be a different request)' }}">
+                                    <span title="{{ ($slowUserRequest->slowest_breakdown ?? null) ? 'Slowest: '.$slowUserRequest->slowest_breakdown : 'Slowest Total (client request time, incl. download)' }}{{ $slowUserRequest->slowest === null ? "\nNot slow on the server" : "\nSlowest server time: ".number_format($slowUserRequest->slowest).' ms (may be a different request)' }}">
                                         <strong>{{ number_format($slowUserRequest->client_slowest) }}</strong> ms
                                     </span>
                                     <p class="mt-1 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
@@ -100,7 +100,7 @@
                                 </x-pulse::td>
                                 <x-pulse::td numeric class="text-gray-700 dark:text-gray-300">
                                     @if (($endpoint->client_slowest ?? null) !== null)
-                                        <span title="Slowest client time (incl. download){{ $endpoint->slowest === null ? '; not slow on the server' : '; slowest server time '.number_format($endpoint->slowest).' ms' }}">
+                                        <span title="{{ ($endpoint->slowest_breakdown ?? null) ? 'Slowest: '.$endpoint->slowest_breakdown : 'Slowest Total (client request time, incl. download)' }}{{ $endpoint->slowest === null ? "\nNot slow on the server" : "\nSlowest server time: ".number_format($endpoint->slowest).' ms (may be a different request)' }}">
                                             <strong>{{ number_format($endpoint->client_slowest) }}</strong> ms
                                         </span>
                                         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">

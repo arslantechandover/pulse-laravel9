@@ -56,7 +56,22 @@
                                         {{ $slowRequest->action }}
                                     </p>
                                 @endif
-                                @if ($breakdown = $slowRequest->breakdown)
+                                @if ($client = $slowRequest->client)
+                                    @php
+                                        $partsText = \Laravel\Pulse\Livewire\SlowRequests::clientPartsText($client['average_parts']);
+                                        $clientSize = fn ($bytes) => $bytes === null ? 'n/a' : ($bytes >= 1048576 ? number_format($bytes / 1048576, 1).' MB' : number_format($bytes / 1024).' KB');
+                                        $clientTitle = implode("\n", array_filter([
+                                            'Average of '.number_format($client['requests']).' slow request(s): '.$partsText.' = Total '.number_format($client['average_total']).' ms',
+                                            'Server side (Queue + DB + HTTP + App): '.number_format($client['average_server']).' ms · Response '.$clientSize($client['bytes']['avg']),
+                                            $slowRequest->slowest_breakdown ? 'Slowest: '.$slowRequest->slowest_breakdown : null,
+                                            ($slowRequest->latest['breakdown'] ?? null) ? 'Latest ('.\Carbon\CarbonImmutable::createFromTimestamp($slowRequest->latest['timestamp'])->diffForHumans().'): '.$slowRequest->latest['breakdown'] : null,
+                                            'Total = client request time, measured by nginx: first request byte received → last response byte sent, incl. download. Excludes DNS/TLS set-up and app-side parsing. Slow = Total at or above '.(is_array($config['client_threshold']) ? 'the configured threshold' : $config['client_threshold'].'ms').'.',
+                                        ]));
+                                    @endphp
+                                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400 truncate" title="{{ $clientTitle }}">
+                                        avg {{ number_format($client['average_total']) }} ms = {{ $partsText }}
+                                    </p>
+                                @elseif ($breakdown = $slowRequest->breakdown)
                                     @php
                                         $ms = fn ($value) => $value === null ? 'n/a' : number_format($value).' ms';
                                         $queueMeasured = $breakdown['queue_measured'];
@@ -67,18 +82,6 @@
                                     @endphp
                                     <p class="mt-1 text-xs text-gray-500 dark:text-gray-400 truncate" title="{{ $title }}">
                                         avg total {{ $ms($breakdown['total']['avg']) }} = queue {{ $queue }} + DB {{ $ms($breakdown['db']['avg']) }} ({{ number_format($breakdown['queries']['avg'] ?? 0) }} queries) + HTTP {{ $ms($breakdown['http']['avg']) }} + app + other {{ $ms($breakdown['app']['avg']) }}
-                                    </p>
-                                @endif
-                                @if ($client = $slowRequest->client)
-                                    @php
-                                        $clientMs = fn ($value) => $value === null ? 'n/a' : number_format($value).' ms';
-                                        $clientSize = fn ($bytes) => $bytes === null ? 'n/a' : ($bytes >= 1048576 ? number_format($bytes / 1048576, 1).' MB' : number_format($bytes / 1024).' KB');
-                                        $clientTitle = 'Client time, measured by the web server: first request byte received → last response byte sent. upload = receiving the request; queue = waiting for a PHP-FPM worker; DB, HTTP (outgoing calls) and app = server processing until the response was built; download = handing the response over and sending it to the client. Excludes DNS/TCP/TLS connection set-up and app-side parsing. '
-                                            .'Average of '.number_format($client['requests']).' request(s) at or above '.(is_array($config['client_threshold']) ? 'the configured' : $config['client_threshold'].'ms').' threshold. '
-                                            .'Max: client '.$clientMs($client['total']['max']).', upload '.$clientMs($client['upload']['max']).', queue '.$clientMs($client['queue']['max']).', DB '.$clientMs($client['db']['max']).' ('.number_format($client['queries']['max'] ?? 0).' queries), HTTP '.$clientMs($client['http']['max']).', app '.$clientMs($client['app']['max']).', download '.$clientMs($client['download']['max']).', response '.$clientSize($client['bytes']['max']).'.';
-                                    @endphp
-                                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400 truncate" title="{{ $clientTitle }}">
-                                        client {{ $clientMs($client['total']['avg']) }} = upload {{ $clientMs($client['upload']['avg']) }} + queue {{ $clientMs($client['queue']['avg']) }} + DB {{ $clientMs($client['db']['avg']) }} ({{ number_format($client['queries']['avg'] ?? 0) }} queries) + HTTP {{ $clientMs($client['http']['avg']) }} + app {{ $clientMs($client['app']['avg']) }} + download {{ $clientMs($client['download']['avg']) }} · {{ $clientSize($client['bytes']['avg']) }} ({{ number_format($client['requests']) }}×)
                                     </p>
                                 @endif
                                 @if (is_array($config['threshold']))
@@ -98,7 +101,7 @@
                             </x-pulse::td>
                             <x-pulse::td numeric class="text-gray-700 dark:text-gray-300">
                                 @if (($slowRequest->client['total']['max'] ?? null) !== null)
-                                    <span title="Slowest client time (web server: first request byte received → last response byte sent, incl. download){{ $slowRequest->slowest === null ? '; not slow on the server' : '; slowest server time '.number_format($slowRequest->slowest).' ms (may be a different request)' }}">
+                                    <span title="{{ $slowRequest->slowest_breakdown ? 'Slowest: '.$slowRequest->slowest_breakdown : 'Slowest Total (client request time, incl. download)' }}{{ $slowRequest->slowest === null ? "\nNot slow on the server" : "\nSlowest server time: ".number_format($slowRequest->slowest).' ms (may be a different request)' }}">
                                         <strong>{{ number_format($slowRequest->client['total']['max']) }}</strong> ms
                                     </span>
                                     <p class="mt-1 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
