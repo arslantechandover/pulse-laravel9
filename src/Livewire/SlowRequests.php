@@ -18,7 +18,7 @@ use Livewire\Attributes\Url;
 #[Lazy]
 class SlowRequests extends Card
 {
-    use Thresholds;
+    use Concerns\LatestSlowRequests, Thresholds;
 
     /**
      * Ordering.
@@ -53,7 +53,10 @@ class SlowRequests extends Card
                 // Fork: client-perceived time measured by the web server (only when the client requests recorder is enabled)...
                 $client = $this->clientRequests();
 
-                return $rows->keys()->merge($client->keys())->unique()->map(function ($key) use ($rows, $client, $sums, $maxima, $counts) {
+                // Fork: the latest slow request per endpoint (from the stored per-request entries)...
+                $latest = $this->latestSlowRequests('slow_request', 'slow_client_request');
+
+                return $rows->keys()->merge($client->keys())->unique()->map(function ($key) use ($rows, $client, $sums, $maxima, $counts, $latest) {
                     [$method, $uri, $action] = json_decode($key, flags: JSON_THROW_ON_ERROR);
                     $row = $rows->get($key);
 
@@ -66,6 +69,7 @@ class SlowRequests extends Card
                         'threshold' => $this->threshold($uri, SlowRequestsRecorder::class),
                         'breakdown' => $this->breakdown($sums->get($key), $maxima->get($key), $counts->get($key)),
                         'client' => $client->get($key),
+                        'latest' => $latest->get($key),
                     ];
                 })->sortByDesc(fn ($row) => match ($this->orderBy) {
                     'count' => [$row->count ?? 0, $row->client['requests'] ?? 0],

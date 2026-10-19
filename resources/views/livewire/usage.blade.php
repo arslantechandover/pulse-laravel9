@@ -64,6 +64,7 @@
                             @else
                                 {{ number_format($userRequestCount->count) }}
                             @endif
+                            <x-pulse::latest-slow-request :latest="$userRequestCount->latest ?? null" class="font-normal text-right" />
                         </x-slot:stats>
                     </x-pulse::user-card>
                 @endforeach

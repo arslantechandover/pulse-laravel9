@@ -17,7 +17,7 @@ use Livewire\Attributes\Lazy;
 #[Lazy]
 class SlowUserRequests extends Card
 {
-    use Thresholds;
+    use Concerns\LatestSlowRequests, Thresholds;
 
     /**
      * The number of endpoints shown per user.
@@ -49,8 +49,12 @@ class SlowUserRequests extends Card
             $clientSlowest = $client ? $this->aggregateTypes(['slow_client_user_endpoint'], 'max', limit: 1000)->keyBy('key') : collect();
             $clientOnly = $client ? $this->aggregateTypes(['slow_client_user_endpoint_only'], 'count', limit: 1000)->keyBy('key') : collect();
 
+            // Fork: the latest slow request per user endpoint and per user (from the stored per-request entries)...
+            $latest = $this->latestSlowRequests('slow_user_endpoint', 'slow_client_user_endpoint');
+            $latestByUser = $this->latestByUser($latest);
+
             $endpoints = $server->keys()->merge($clientSlowest->keys())->filter(fn ($key) => $key !== '')->unique()
-                ->map(function ($key) use ($server, $clientSlowest, $clientOnly) {
+                ->map(function ($key) use ($server, $clientSlowest, $clientOnly, $latest) {
                     [$userKey, $method, $uri] = json_decode($key, flags: JSON_THROW_ON_ERROR);
 
                     return (object) [
@@ -61,6 +65,7 @@ class SlowUserRequests extends Card
                         'slowest' => $server->get($key)?->max,
                         'client_slowest' => $clientSlowest->get($key)?->slow_client_user_endpoint,
                         'threshold' => $this->threshold($uri, SlowRequests::class),
+                        'latest' => $latest->get($key),
                     ];
                 })
                 ->whereIn('user_key', $userKeys->all())
@@ -69,7 +74,7 @@ class SlowUserRequests extends Card
 
             $users = Pulse::resolveUsers($counts->pluck('key'));
 
-            return $counts->map(function ($row) use ($users, $endpoints) {
+            return $counts->map(function ($row) use ($users, $endpoints, $latestByUser) {
                 $userEndpoints = $endpoints->get((string) $row->key, collect())->values();
 
                 return (object) [
@@ -78,6 +83,7 @@ class SlowUserRequests extends Card
                     'count' => (int) $row->count,
                     'slowest' => $userEndpoints->max('slowest'),
                     'client_slowest' => $userEndpoints->max('client_slowest'),
+                    'latest' => $latestByUser->get((string) $row->key),
                     'endpoints' => $userEndpoints,
                 ];
             });

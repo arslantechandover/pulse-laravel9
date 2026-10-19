@@ -77,6 +77,7 @@
                                 @else
                                     <strong>{{ number_format($slowUserRequest->slowest) ?: '<1' }}</strong> ms
                                 @endif
+                                <x-pulse::latest-slow-request :latest="$slowUserRequest->latest ?? null" />
                             </x-pulse::td>
                         </tr>
                         @foreach ($slowUserRequest->endpoints->take($endpointsPerUser) as $endpoint)
@@ -110,6 +111,7 @@
                                     @else
                                         <strong>{{ number_format($endpoint->slowest) ?: '<1' }}</strong> ms
                                     @endif
+                                    <x-pulse::latest-slow-request :latest="$endpoint->latest ?? null" />
                                 </x-pulse::td>
                             </tr>
                         @endforeach

@@ -19,6 +19,8 @@ use Livewire\Attributes\Url;
 #[Lazy]
 class Usage extends Card
 {
+    use Concerns\LatestSlowRequests;
+
     /**
      * The type of usage to show.
      *
@@ -64,10 +66,16 @@ class Usage extends Card
 
                 $users = Pulse::resolveUsers($counts->pluck('key'));
 
+                // Fork: the latest slow request per user, for the slow endpoints view (from the stored per-request entries)...
+                $latest = $type === 'slow_requests'
+                    ? $this->latestByUser($this->latestSlowRequests('slow_user_endpoint', 'slow_client_user_endpoint'))
+                    : collect();
+
                 return $counts->map(fn ($row) => (object) [
                     'key' => $row->key,
                     'user' => $users->find($row->key),
                     'count' => (int) $row->count,
+                    'latest' => $latest->get((string) $row->key),
                 ]);
             },
             $type
