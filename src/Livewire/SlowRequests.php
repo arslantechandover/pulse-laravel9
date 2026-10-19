@@ -4,7 +4,9 @@ namespace Laravel\Pulse\Livewire;
 
 use Illuminate\Contracts\Support\Renderable;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\View;
+use Laravel\Pulse\Recorders\ClientRequests as ClientRequestsRecorder;
 use Laravel\Pulse\Recorders\Concerns\Thresholds;
 use Laravel\Pulse\Recorders\SlowRequests as SlowRequestsRecorder;
 use Livewire\Attributes\Lazy;
@@ -39,26 +41,36 @@ class SlowRequests extends Card
                 $maxima = $this->aggregateTypes($parts, 'max', limit: 1000)->keyBy('key');
                 $counts = $this->aggregateTypes(['slow_request_total', 'slow_request_queue_measured'], 'count', limit: 1000)->keyBy('key');
 
-                return $this->aggregate(
+                $rows = $this->aggregate(
                     'slow_request',
                     ['max', 'count'],
                     match ($this->orderBy) {
                         'count' => 'count',
                         default => 'max',
                     },
-                )->map(function ($row) use ($sums, $maxima, $counts) {
-                    [$method, $uri, $action] = json_decode($row->key, flags: JSON_THROW_ON_ERROR);
+                )->keyBy('key');
+
+                // Fork: client-perceived time measured by the web server (only when the client requests recorder is enabled)...
+                $client = $this->clientRequests();
+
+                return $rows->keys()->merge($client->keys())->unique()->map(function ($key) use ($rows, $client, $sums, $maxima, $counts) {
+                    [$method, $uri, $action] = json_decode($key, flags: JSON_THROW_ON_ERROR);
+                    $row = $rows->get($key);
 
                     return (object) [
                         'uri' => $uri,
                         'method' => $method,
                         'action' => $action,
-                        'count' => $row->count,
-                        'slowest' => $row->max,
+                        'count' => $row?->count,
+                        'slowest' => $row?->max,
                         'threshold' => $this->threshold($uri, SlowRequestsRecorder::class),
-                        'breakdown' => $this->breakdown($sums->get($row->key), $maxima->get($row->key), $counts->get($row->key)),
+                        'breakdown' => $this->breakdown($sums->get($key), $maxima->get($key), $counts->get($key)),
+                        'client' => $client->get($key),
                     ];
-                });
+                })->sortByDesc(fn ($row) => match ($this->orderBy) {
+                    'count' => [$row->count ?? 0, $row->client['requests'] ?? 0],
+                    default => max($row->slowest ?? 0, $row->client['total']['max'] ?? 0),
+                })->values();
             },
             $this->orderBy,
         );
@@ -70,8 +82,40 @@ class SlowRequests extends Card
             'config' => [
                 'threshold' => Config::get('pulse.recorders.'.SlowRequestsRecorder::class.'.threshold'),
                 'sample_rate' => Config::get('pulse.recorders.'.SlowRequestsRecorder::class.'.sample_rate'),
+                'client_threshold' => Config::get('pulse.recorders.'.ClientRequestsRecorder::class.'.threshold'),
             ],
         ]);
+    }
+
+    /**
+     * Fork: client-perceived time per endpoint (empty unless the client requests recorder is enabled).
+     *
+     * @return \Illuminate\Support\Collection<string, array<string, mixed>>
+     */
+    protected function clientRequests(): Collection
+    {
+        if (! Config::get('pulse.recorders.'.ClientRequestsRecorder::class.'.enabled')) {
+            return collect();
+        }
+
+        $types = ['slow_client_request', ...array_map(fn ($part) => "slow_client_request_{$part}", ClientRequestsRecorder::PARTS)];
+        $sums = $this->aggregateTypes($types, 'sum', limit: 1000)->keyBy('key');
+        $maxima = $this->aggregateTypes($types, 'max', limit: 1000)->keyBy('key');
+        $counts = $this->aggregateTypes(['slow_client_request'], 'count', limit: 1000)->keyBy('key');
+
+        return $counts->filter(fn ($row) => ($row->slow_client_request ?? 0) > 0)->map(function ($row, $key) use ($sums, $maxima) {
+            $requests = (int) $row->slow_client_request;
+            $part = fn (string $type) => [
+                'avg' => isset($sums->get($key)->{$type}) ? round($sums->get($key)->{$type} / $requests, 1) : null,
+                'max' => isset($maxima->get($key)->{$type}) ? (float) $maxima->get($key)->{$type} : null,
+            ];
+
+            return [
+                'requests' => $requests,
+                'total' => $part('slow_client_request'),
+                ...collect(ClientRequestsRecorder::PARTS)->mapWithKeys(fn ($name) => [$name => $part("slow_client_request_{$name}")])->all(),
+            ];
+        });
     }
 
     /**

@@ -219,6 +219,36 @@ class SlowRequests
     }
 
     /**
+     * Fork: the request's timing so far, taken when the response has been built (for the client timing header).
+     *
+     * h = web server hand-off timestamp, q = queue wait (hand-off → PHP start), p = PHP start → now, d/n = DB time and
+     * queries, x = outgoing HTTP time. DB and HTTP are null when the breakdown is disabled.
+     *
+     * @return array{h: ?float, q: ?int, p: int, d: ?int, n: ?int, x: ?int}
+     */
+    public function clientTiming(Request $request): array
+    {
+        $now = microtime(true);
+        $phpStart = $request->server('REQUEST_TIME_FLOAT');
+        $phpStart = is_numeric($phpStart) && (float) $phpStart <= $now && (float) $phpStart > $now - 3600 ? (float) $phpStart : $now;
+
+        $handOff = $request->server(Config::get('pulse.recorders.'.self::class.'.queue_start_param', 'PULSE_REQUEST_START'));
+        $handOff = is_numeric($handOff) && (float) $handOff <= $phpStart + 1 && (float) $handOff > $phpStart - 3600 ? min((float) $handOff, $phpStart) : null;
+
+        $breakdown = (bool) Config::get('pulse.recorders.'.self::class.'.breakdown', true);
+        $http = $this->httpMs + ($this->httpSince !== null ? max(0.0, ($now - $this->httpSince) * 1000 - $this->httpOverlapMs) : 0.0);
+
+        return [
+            'h' => $handOff,
+            'q' => $handOff === null ? null : (int) round(($phpStart - $handOff) * 1000),
+            'p' => (int) round(($now - $phpStart) * 1000),
+            'd' => $breakdown ? (int) round($this->dbMs) : null,
+            'n' => $breakdown ? $this->queries : null,
+            'x' => $breakdown ? (int) round($http) : null,
+        ];
+    }
+
+    /**
      * Fork: full timing of the request, in whole milliseconds (null without the breakdown, e.g. no RequestHandled).
      *
      * total = start → response sent, where start = web server hand-off (`PULSE_REQUEST_START`, e.g. nginx `$msec`)

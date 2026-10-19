@@ -69,6 +69,18 @@
                                         avg total {{ $ms($breakdown['total']['avg']) }} = queue {{ $queue }} + DB {{ $ms($breakdown['db']['avg']) }} ({{ number_format($breakdown['queries']['avg'] ?? 0) }} queries) + HTTP {{ $ms($breakdown['http']['avg']) }} + app + other {{ $ms($breakdown['app']['avg']) }}
                                     </p>
                                 @endif
+                                @if ($client = $slowRequest->client)
+                                    @php
+                                        $clientMs = fn ($value) => $value === null ? 'n/a' : number_format($value).' ms';
+                                        $clientSize = fn ($bytes) => $bytes === null ? 'n/a' : ($bytes >= 1048576 ? number_format($bytes / 1048576, 1).' MB' : number_format($bytes / 1024).' KB');
+                                        $clientTitle = 'Client time, measured by the web server: first request byte received → last response byte sent. upload = receiving the request; queue = waiting for a PHP-FPM worker; DB, HTTP (outgoing calls) and app = server processing until the response was built; download = handing the response over and sending it to the client. Excludes DNS/TCP/TLS connection set-up and app-side parsing. '
+                                            .'Average of '.number_format($client['requests']).' request(s) at or above '.(is_array($config['client_threshold']) ? 'the configured' : $config['client_threshold'].'ms').' threshold. '
+                                            .'Max: client '.$clientMs($client['total']['max']).', upload '.$clientMs($client['upload']['max']).', queue '.$clientMs($client['queue']['max']).', DB '.$clientMs($client['db']['max']).' ('.number_format($client['queries']['max'] ?? 0).' queries), HTTP '.$clientMs($client['http']['max']).', app '.$clientMs($client['app']['max']).', download '.$clientMs($client['download']['max']).', response '.$clientSize($client['bytes']['max']).'.';
+                                    @endphp
+                                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400 truncate" title="{{ $clientTitle }}">
+                                        client {{ $clientMs($client['total']['avg']) }} = upload {{ $clientMs($client['upload']['avg']) }} + queue {{ $clientMs($client['queue']['avg']) }} + DB {{ $clientMs($client['db']['avg']) }} ({{ number_format($client['queries']['avg'] ?? 0) }} queries) + HTTP {{ $clientMs($client['http']['avg']) }} + app {{ $clientMs($client['app']['avg']) }} + download {{ $clientMs($client['download']['avg']) }} · {{ $clientSize($client['bytes']['avg']) }} ({{ number_format($client['requests']) }}×)
+                                    </p>
+                                @endif
                                 @if (is_array($config['threshold']))
                                     <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                                         {{ $slowRequest->threshold }}ms threshold
@@ -76,14 +88,18 @@
                                 @endif
                             </x-pulse::td>
                             <x-pulse::td numeric class="text-gray-700 dark:text-gray-300 font-bold">
-                                @if ($config['sample_rate'] < 1)
+                                @if ($slowRequest->count === null)
+                                    <span title="Not slow on the server; see the client line">&mdash;</span>
+                                @elseif ($config['sample_rate'] < 1)
                                     <span title="Sample rate: {{ $config['sample_rate'] }}, Raw value: {{ number_format($slowRequest->count) }}">~{{ number_format($slowRequest->count * (1 / $config['sample_rate'])) }}</span>
                                 @else
                                     {{ number_format($slowRequest->count) }}
                                 @endif
                             </x-pulse::td>
                             <x-pulse::td numeric class="text-gray-700 dark:text-gray-300">
-                                @if ($slowRequest->slowest === null)
+                                @if ($slowRequest->slowest === null && $slowRequest->client)
+                                    <span title="Not slow on the server; see the client line">&mdash;</span>
+                                @elseif ($slowRequest->slowest === null)
                                     <strong>Unknown</strong>
                                 @else
                                     <strong>{{ number_format($slowRequest->slowest) ?: '<1' }}</strong> ms

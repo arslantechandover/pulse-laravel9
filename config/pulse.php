@@ -149,6 +149,18 @@ return [
             ],
         ],
 
+        Recorders\ClientRequests::class => [
+            'enabled' => env('PULSE_CLIENT_REQUESTS_ENABLED', false), // enable only after the nginx config is in place
+            // Client total (nginx $request_time) in ms. nginx only sends requests of 1 s or more, so keep this >= 1000.
+            // It ends when nginx has written the last byte, so slow links may finish a little later for the user.
+            'threshold' => env('PULSE_SLOW_CLIENT_REQUESTS_THRESHOLD', 5000),
+            'listen' => env('PULSE_CLIENT_REQUESTS_LISTEN', 'udp://127.0.0.1:5140'),
+            'ignore' => [
+                '#^/'.env('PULSE_PATH', 'pulse').'$#', // Pulse dashboard...
+                '#^/telescope#', // Telescope dashboard...
+            ],
+        ],
+
         Recorders\Exceptions::class => [
             'enabled' => env('PULSE_EXCEPTIONS_ENABLED', true),
             'sample_rate' => env('PULSE_EXCEPTIONS_SAMPLE_RATE', 1),
