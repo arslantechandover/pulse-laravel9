@@ -21,8 +21,6 @@ Laravel 9.52 compatibility. On Laravel 10+ each change defers to the original up
 
 * Latest slow query / job / outgoing request (since v1.4.7.13): Slow Queries (per query and location), Slow Jobs (per job) and Slow Outgoing Requests (per method and URL group) show `latest N ms · X minutes ago` under Slowest, like the request tiles. Hover shows the exact local time. Values come from the entries these recorders already store (`slow_query`, `slow_job`, `slow_outgoing_request`) via `LatestSlowRequests::latestEntries()`. No recorder or storage change; Slowest and counts are unchanged. The latest-line component takes an optional label ("query", "job", "outgoing request") for its hover text.
 
-* Servers card, PHP-FPM workers chart (since v1.4.7.14): the peak line is drawn solid amber at 1.5 px instead of 50% transparent light purple at 1 px, so short worker bursts (highest 1-second reading per interval) stay visible on the fixed 0 to max_children scale. The average line is unchanged. The hover explains both lines and that the count includes idle workers. Other Servers charts are unchanged.
-
 ### Changed
 
 * `Recorders\SlowRequests`: for authenticated slow requests, additionally records `slow_user_endpoint` (key `[user, method, route]`, value duration, `max` + `count`) for the endpoint details in the Slow User Requests card. Adds one entry per authenticated slow request plus aggregate rows per distinct user/route; opt out with `'user_endpoints' => false` in the recorder's config (default `true`). Existing `slow_request` / `slow_user_request` recording unchanged. Fork-only feature.
