@@ -91,6 +91,7 @@ if ($this->wantsHighlighting()) {
                                 @else
                                     <strong>{{ number_format($query->slowest) ?: '<1' }}</strong> ms
                                 @endif
+                                <x-pulse::latest-slow-request :latest="$query->latest ?? null" />
                             </x-pulse::td>
                         </tr>
                     @endforeach

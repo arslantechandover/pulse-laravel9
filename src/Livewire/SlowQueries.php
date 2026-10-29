@@ -16,7 +16,7 @@ use Livewire\Attributes\Url;
 #[Lazy]
 class SlowQueries extends Card
 {
-    use Thresholds;
+    use Concerns\LatestSlowRequests, Thresholds;
 
     /**
      * Ordering.
@@ -44,24 +44,30 @@ class SlowQueries extends Card
     public function render(): Renderable
     {
         [$slowQueries, $time, $runAt] = $this->remember(
-            fn () => $this->aggregate(
-                'slow_query',
-                ['max', 'count'],
-                match ($this->orderBy) {
-                    'count' => 'count',
-                    default => 'max',
-                },
-            )->map(function ($row) {
-                [$sql, $location] = json_decode($row->key, flags: JSON_THROW_ON_ERROR);
+            function () {
+                // Fork: the latest slow query per query + location (from the stored per-query entries)...
+                $latest = $this->latestEntries('slow_query', 'query');
 
-                return (object) [
-                    'sql' => $sql,
-                    'location' => $location,
-                    'slowest' => $row->max,
-                    'count' => $row->count,
-                    'threshold' => $this->threshold($sql, SlowQueriesRecorder::class),
-                ];
-            }),
+                return $this->aggregate(
+                    'slow_query',
+                    ['max', 'count'],
+                    match ($this->orderBy) {
+                        'count' => 'count',
+                        default => 'max',
+                    },
+                )->map(function ($row) use ($latest) {
+                    [$sql, $location] = json_decode($row->key, flags: JSON_THROW_ON_ERROR);
+
+                    return (object) [
+                        'sql' => $sql,
+                        'location' => $location,
+                        'slowest' => $row->max,
+                        'count' => $row->count,
+                        'threshold' => $this->threshold($sql, SlowQueriesRecorder::class),
+                        'latest' => $latest->get($row->key),
+                    ];
+                });
+            },
             $this->orderBy,
         );
 

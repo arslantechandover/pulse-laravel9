@@ -65,6 +65,7 @@
                                 @else
                                     <strong>{{ number_format($job->slowest) ?: '<1' }}</strong> ms
                                 @endif
+                                <x-pulse::latest-slow-request :latest="$job->latest ?? null" />
                             </x-pulse::td>
                         </tr>
                     @endforeach

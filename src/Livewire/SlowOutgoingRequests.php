@@ -16,7 +16,7 @@ use Livewire\Attributes\Url;
 #[Lazy]
 class SlowOutgoingRequests extends Card
 {
-    use Thresholds;
+    use Concerns\LatestSlowRequests, Thresholds;
 
     /**
      * Ordering.
@@ -32,24 +32,30 @@ class SlowOutgoingRequests extends Card
     public function render(): Renderable
     {
         [$slowOutgoingRequests, $time, $runAt] = $this->remember(
-            fn () => $this->aggregate(
-                'slow_outgoing_request',
-                ['max', 'count'],
-                match ($this->orderBy) {
-                    'count' => 'count',
-                    default => 'max',
-                },
-            )->map(function ($row) {
-                [$method, $uri] = json_decode($row->key, flags: JSON_THROW_ON_ERROR);
+            function () {
+                // Fork: the latest slow call per method + URL group (from the stored per-call entries)...
+                $latest = $this->latestEntries('slow_outgoing_request', 'outgoing request');
 
-                return (object) [
-                    'method' => $method,
-                    'uri' => $uri,
-                    'slowest' => $row->max,
-                    'count' => $row->count,
-                    'threshold' => $this->threshold($uri, SlowOutgoingRequestsRecorder::class),
-                ];
-            }),
+                return $this->aggregate(
+                    'slow_outgoing_request',
+                    ['max', 'count'],
+                    match ($this->orderBy) {
+                        'count' => 'count',
+                        default => 'max',
+                    },
+                )->map(function ($row) use ($latest) {
+                    [$method, $uri] = json_decode($row->key, flags: JSON_THROW_ON_ERROR);
+
+                    return (object) [
+                        'method' => $method,
+                        'uri' => $uri,
+                        'slowest' => $row->max,
+                        'count' => $row->count,
+                        'threshold' => $this->threshold($uri, SlowOutgoingRequestsRecorder::class),
+                        'latest' => $latest->get($row->key),
+                    ];
+                });
+            },
             $this->orderBy,
         );
 

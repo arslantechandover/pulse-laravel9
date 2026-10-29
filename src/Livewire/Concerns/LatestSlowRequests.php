@@ -53,6 +53,29 @@ trait LatestSlowRequests
     }
 
     /**
+     * The newest entry per key of one type in the selected period (Slow Queries, Slow Jobs, Slow Outgoing Requests).
+     *
+     * @return \Illuminate\Support\Collection<string, array{duration: int, timestamp: int, source: string, label: string}>
+     */
+    protected function latestEntries(string $type, string $label): Collection
+    {
+        $latest = [];
+
+        foreach (DB::connection(Config::get('pulse.storage.database.connection'))
+            ->table('pulse_entries')
+            ->select(['key', 'timestamp', 'value'])
+            ->where('type', $type)
+            ->where('timestamp', '>=', CarbonImmutable::now()->subSeconds((int) $this->periodAsInterval()->totalSeconds)->getTimestamp())
+            ->whereNotNull('value')
+            ->orderBy('timestamp')
+            ->cursor() as $entry) {
+            $latest[$entry->key] = ['duration' => (int) $entry->value, 'timestamp' => (int) $entry->timestamp, 'source' => 'entry', 'label' => $label];
+        }
+
+        return collect($latest);
+    }
+
+    /**
      * The per-request breakdowns of slow client requests in the selected period (empty without client timing).
      *
      * @return \Illuminate\Support\Collection<int, array{endpoint: string, method: string, path: string, user: ?string, total: int, timestamp: int, parts: array<string, int>}>

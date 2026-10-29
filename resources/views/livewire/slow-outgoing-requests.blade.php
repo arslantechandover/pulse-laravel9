@@ -89,6 +89,7 @@
                                 @else
                                     <strong>{{ number_format($request->slowest) ?: '<1' }}</strong> ms
                                 @endif
+                                <x-pulse::latest-slow-request :latest="$request->latest ?? null" />
                             </x-pulse::td>
                         </tr>
                     @endforeach

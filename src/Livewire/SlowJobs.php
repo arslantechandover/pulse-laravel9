@@ -16,7 +16,7 @@ use Livewire\Attributes\Url;
 #[Lazy]
 class SlowJobs extends Card
 {
-    use Thresholds;
+    use Concerns\LatestSlowRequests, Thresholds;
 
     /**
      * Ordering.
@@ -32,19 +32,25 @@ class SlowJobs extends Card
     public function render(): Renderable
     {
         [$slowJobs, $time, $runAt] = $this->remember(
-            fn () => $this->aggregate(
-                'slow_job',
-                ['max', 'count'],
-                match ($this->orderBy) {
-                    'count' => 'count',
-                    default => 'max',
-                },
-            )->map(fn ($row) => (object) [
-                'job' => $row->key,
-                'slowest' => $row->max,
-                'count' => $row->count,
-                'threshold' => $this->threshold($row->key, SlowJobsRecorder::class),
-            ]),
+            function () {
+                // Fork: the latest slow run per job (from the stored per-job entries)...
+                $latest = $this->latestEntries('slow_job', 'job');
+
+                return $this->aggregate(
+                    'slow_job',
+                    ['max', 'count'],
+                    match ($this->orderBy) {
+                        'count' => 'count',
+                        default => 'max',
+                    },
+                )->map(fn ($row) => (object) [
+                    'job' => $row->key,
+                    'slowest' => $row->max,
+                    'count' => $row->count,
+                    'threshold' => $this->threshold($row->key, SlowJobsRecorder::class),
+                    'latest' => $latest->get($row->key),
+                ]);
+            },
             $this->orderBy,
         );
 
