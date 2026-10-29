@@ -145,7 +145,7 @@ $rows = ! empty($rows) ? $rows : 1;
                     $metrics = collect([
                         'load' => ['label' => 'Load (1m)'.($server->cores ? ' / '.$server->cores.' cores' : ''), 'format' => fn ($v) => number_format($v, 2), 'unit' => '', 'decimals' => 2],
                         'iowait' => ['label' => 'IO wait', 'format' => fn ($v) => number_format($v, 1), 'unit' => '%'],
-                        'fpm_workers' => ['label' => 'PHP-FPM workers'.($fpmPools !== '' ? ' · '.$fpmPools : ''), 'format' => fn ($v) => number_format($v), 'avg_format' => fn ($v) => number_format($v, 1), 'unit' => $server->fpm_max_children ? ' / '.$server->fpm_max_children : '', 'sample' => '1-second', 'title' => 'Worker processes, sampled every second. '.$fpmTitle],
+                        'fpm_workers' => ['label' => 'PHP-FPM workers'.($fpmPools !== '' ? ' · '.$fpmPools : ''), 'format' => fn ($v) => number_format($v), 'avg_format' => fn ($v) => number_format($v, 1), 'unit' => $server->fpm_max_children ? ' / '.$server->fpm_max_children : '', 'sample' => '1-second', 'emphasize_peak' => true, 'title' => 'Worker processes (idle + busy), sampled every second. Chart scale 0 to max_children. Purple line: average per interval; amber line: peak (highest 1-second reading per interval), so short bursts stay visible. '.$fpmTitle],
                         'fpm_queue' => ['label' => 'Listen queue', 'format' => fn ($v) => number_format($v), 'avg_format' => fn ($v) => number_format($v, 1), 'unit' => '', 'sample' => '1-second', 'title' => 'Requests waiting for a free PHP-FPM worker at the same moment, sampled every second. '.$fpmTitle],
                     ])->filter(fn ($metric, $key) => $charts[$key]['has_data']);
                 @endphp
@@ -187,6 +187,7 @@ $rows = ! empty($rows) ? $rows : 1;
                                             yMax: @js($charts[$key]['y_max']),
                                             unit: @js($metric['unit'] === '%' ? '%' : ''),
                                             decimals: @js($metric['decimals'] ?? 1),
+                                            emphasizePeak: @js($metric['emphasize_peak'] ?? false),
                                         })"
                                     >
                                         <canvas x-ref="canvas" class="w-full ring-1 ring-gray-900/5 bg-white dark:bg-gray-900 rounded-md shadow-sm"></canvas>
@@ -264,7 +265,8 @@ Alpine.data('serverMetricChart', (config) => ({
                 data: {
                     labels: config.labels,
                     datasets: [
-                        dataset('Peak', '#c084fc80', 1, config.max),
+                        // Fork: a clearly visible peak line where short bursts matter (PHP-FPM workers)...
+                        config.emphasizePeak ? dataset('Peak', '#f59e0b', 1.5, config.max) : dataset('Peak', '#c084fc80', 1, config.max),
                         dataset('Average', '#9333ea', 2, config.avg),
                     ],
                 },
